@@ -1258,18 +1258,12 @@ export interface components {
             requestedRoleTemplateId?: string;
             requestedScopeType?: "global" | "state" | "ihk";
             requestedScopeId?: string;
-            proofFileName?: string;
-            proofMimeType?: string;
-            proofContentBase64?: string;
             proofNote?: string;
         };
         PermissionRequestSubmitRequest: {
             requestedRoleTemplateId: string;
             requestedScopeType: "global" | "state" | "ihk";
             requestedScopeId?: string;
-            proofFileName?: string;
-            proofMimeType?: string;
-            proofContentBase64?: string;
             proofNote?: string;
         };
         PermissionRequestDecisionRequest: {

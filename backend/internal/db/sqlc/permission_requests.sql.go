@@ -18,14 +18,11 @@ INSERT INTO permission_requests (
   requested_role_template_id,
   requested_scope_type,
   requested_scope_id,
-  proof_file_name,
-  proof_mime_type,
-  proof_content_base64,
   proof_note,
   status
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
-RETURNING id, user_id, request_type, requested_role_template_id, requested_scope_type, requested_scope_id, proof_file_name, proof_mime_type, proof_content_base64, proof_note, status, reviewed_by, reviewed_at, decision_note, created_at, updated_at
+VALUES ($1, $2, $3, $4, $5, $6,  'pending')
+RETURNING id, user_id, request_type, requested_role_template_id, requested_scope_type, requested_scope_id, proof_note, status, reviewed_by, reviewed_at, decision_note, created_at, updated_at
 `
 
 type CreatePermissionRequestParams struct {
@@ -34,9 +31,6 @@ type CreatePermissionRequestParams struct {
 	RequestedRoleTemplateID pgtype.UUID `json:"requested_role_template_id"`
 	RequestedScopeType      string      `json:"requested_scope_type"`
 	RequestedScopeID        *string     `json:"requested_scope_id"`
-	ProofFileName           *string     `json:"proof_file_name"`
-	ProofMimeType           *string     `json:"proof_mime_type"`
-	ProofContentBase64      *string     `json:"proof_content_base64"`
 	ProofNote               *string     `json:"proof_note"`
 }
 
@@ -47,9 +41,6 @@ func (q *Queries) CreatePermissionRequest(ctx context.Context, arg CreatePermiss
 		arg.RequestedRoleTemplateID,
 		arg.RequestedScopeType,
 		arg.RequestedScopeID,
-		arg.ProofFileName,
-		arg.ProofMimeType,
-		arg.ProofContentBase64,
 		arg.ProofNote,
 	)
 	var i PermissionRequest
@@ -60,9 +51,6 @@ func (q *Queries) CreatePermissionRequest(ctx context.Context, arg CreatePermiss
 		&i.RequestedRoleTemplateID,
 		&i.RequestedScopeType,
 		&i.RequestedScopeID,
-		&i.ProofFileName,
-		&i.ProofMimeType,
-		&i.ProofContentBase64,
 		&i.ProofNote,
 		&i.Status,
 		&i.ReviewedBy,
@@ -127,9 +115,6 @@ SELECT
   rt.allow_mask AS requested_allow_mask,
   pr.requested_scope_type,
   pr.requested_scope_id,
-  pr.proof_file_name,
-  pr.proof_mime_type,
-  pr.proof_content_base64,
   pr.proof_note,
   pr.status,
   pr.reviewed_by,
@@ -154,9 +139,6 @@ type GetPermissionRequestByIDRow struct {
 	RequestedAllowMask      int64              `json:"requested_allow_mask"`
 	RequestedScopeType      string             `json:"requested_scope_type"`
 	RequestedScopeID        *string            `json:"requested_scope_id"`
-	ProofFileName           *string            `json:"proof_file_name"`
-	ProofMimeType           *string            `json:"proof_mime_type"`
-	ProofContentBase64      *string            `json:"proof_content_base64"`
 	ProofNote               *string            `json:"proof_note"`
 	Status                  string             `json:"status"`
 	ReviewedBy              pgtype.UUID        `json:"reviewed_by"`
@@ -180,9 +162,6 @@ func (q *Queries) GetPermissionRequestByID(ctx context.Context, id pgtype.UUID) 
 		&i.RequestedAllowMask,
 		&i.RequestedScopeType,
 		&i.RequestedScopeID,
-		&i.ProofFileName,
-		&i.ProofMimeType,
-		&i.ProofContentBase64,
 		&i.ProofNote,
 		&i.Status,
 		&i.ReviewedBy,
@@ -244,9 +223,6 @@ SELECT
   pr.requested_role_template_id,
   rt.name AS requested_role_name,
   pr.requested_scope_type,
-  pr.requested_scope_id,
-  pr.proof_file_name,
-  pr.proof_mime_type,
   pr.proof_note,
   pr.status,
   pr.created_at
@@ -272,9 +248,6 @@ type ListPermissionRequestsRow struct {
 	RequestedRoleTemplateID pgtype.UUID        `json:"requested_role_template_id"`
 	RequestedRoleName       string             `json:"requested_role_name"`
 	RequestedScopeType      string             `json:"requested_scope_type"`
-	RequestedScopeID        *string            `json:"requested_scope_id"`
-	ProofFileName           *string            `json:"proof_file_name"`
-	ProofMimeType           *string            `json:"proof_mime_type"`
 	ProofNote               *string            `json:"proof_note"`
 	Status                  string             `json:"status"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
@@ -298,9 +271,6 @@ func (q *Queries) ListPermissionRequests(ctx context.Context, arg ListPermission
 			&i.RequestedRoleTemplateID,
 			&i.RequestedRoleName,
 			&i.RequestedScopeType,
-			&i.RequestedScopeID,
-			&i.ProofFileName,
-			&i.ProofMimeType,
 			&i.ProofNote,
 			&i.Status,
 			&i.CreatedAt,
@@ -316,7 +286,7 @@ func (q *Queries) ListPermissionRequests(ctx context.Context, arg ListPermission
 }
 
 const lockPermissionRequestByID = `-- name: LockPermissionRequestByID :one
-SELECT id, user_id, request_type, requested_role_template_id, requested_scope_type, requested_scope_id, proof_file_name, proof_mime_type, proof_content_base64, proof_note, status, reviewed_by, reviewed_at, decision_note, created_at, updated_at
+SELECT id, user_id, request_type, requested_role_template_id, requested_scope_type, requested_scope_id, proof_note, status, reviewed_by, reviewed_at, decision_note, created_at, updated_at
 FROM permission_requests
 WHERE id = $1
 FOR UPDATE
@@ -332,9 +302,6 @@ func (q *Queries) LockPermissionRequestByID(ctx context.Context, id pgtype.UUID)
 		&i.RequestedRoleTemplateID,
 		&i.RequestedScopeType,
 		&i.RequestedScopeID,
-		&i.ProofFileName,
-		&i.ProofMimeType,
-		&i.ProofContentBase64,
 		&i.ProofNote,
 		&i.Status,
 		&i.ReviewedBy,
@@ -384,7 +351,7 @@ SET status = $2,
     reviewed_at = now(),
     decision_note = $4
 WHERE id = $1
-RETURNING id, user_id, request_type, requested_role_template_id, requested_scope_type, requested_scope_id, proof_file_name, proof_mime_type, proof_content_base64, proof_note, status, reviewed_by, reviewed_at, decision_note, created_at, updated_at
+RETURNING id, user_id, request_type, requested_role_template_id, requested_scope_type, requested_scope_id, proof_note, status, reviewed_by, reviewed_at, decision_note, created_at, updated_at
 `
 
 type UpdatePermissionRequestDecisionParams struct {
@@ -409,9 +376,6 @@ func (q *Queries) UpdatePermissionRequestDecision(ctx context.Context, arg Updat
 		&i.RequestedRoleTemplateID,
 		&i.RequestedScopeType,
 		&i.RequestedScopeID,
-		&i.ProofFileName,
-		&i.ProofMimeType,
-		&i.ProofContentBase64,
 		&i.ProofNote,
 		&i.Status,
 		&i.ReviewedBy,

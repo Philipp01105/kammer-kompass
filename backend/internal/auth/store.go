@@ -84,7 +84,7 @@ func (s *Store) RegisterUser(ctx context.Context, email, displayName, passwordHa
 }
 
 // RegisterUserWithPermissionRequest creates a new user with the given role template assignment. The user will be inactive and unverified by default.
-func (s *Store) RegisterUserWithPermissionRequest(ctx context.Context, email, displayName, passwordHash, roleTemplateID, scopeType string, scopeID, proofFileName, proofMimeType, proofContentBase64, proofNote *string) (User, error) {
+func (s *Store) RegisterUserWithPermissionRequest(ctx context.Context, email, displayName, passwordHash, roleTemplateID, scopeType string, scopeID, proofNote *string) (User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	displayName = strings.TrimSpace(displayName)
 
@@ -131,9 +131,6 @@ func (s *Store) RegisterUserWithPermissionRequest(ctx context.Context, email, di
 		RequestedRoleTemplateID: pgtype.UUID{Bytes: roleID, Valid: true},
 		RequestedScopeType:      scopeType,
 		RequestedScopeID:        scopeID,
-		ProofFileName:           proofFileName,
-		ProofMimeType:           proofMimeType,
-		ProofContentBase64:      proofContentBase64,
 		ProofNote:               proofNote,
 	}); err != nil {
 		return User{}, err
@@ -148,7 +145,7 @@ func (s *Store) RegisterUserWithPermissionRequest(ctx context.Context, email, di
 }
 
 // CreatePermissionRequestForUser creates a new permission request for the given user. The user must not already have the requested permissions orr a pending request
-func (s *Store) CreatePermissionRequestForUser(ctx context.Context, userID, roleTemplateID, scopeType string, scopeID, proofFileName, proofMimeType, proofContentBase64, proofNote *string) error {
+func (s *Store) CreatePermissionRequestForUser(ctx context.Context, userID, roleTemplateID, scopeType string, scopeID, proofNote *string) error {
 	uid, err := uuid.Parse(userID)
 	if err != nil {
 		return ErrUserNotFound
@@ -211,9 +208,6 @@ func (s *Store) CreatePermissionRequestForUser(ctx context.Context, userID, role
 		RequestedRoleTemplateID: roleUUID,
 		RequestedScopeType:      scopeType,
 		RequestedScopeID:        scopeID,
-		ProofFileName:           proofFileName,
-		ProofMimeType:           proofMimeType,
-		ProofContentBase64:      proofContentBase64,
 		ProofNote:               proofNote,
 	})
 	if isUniqueViolation(err, "ux_permission_requests_pending_scope") {

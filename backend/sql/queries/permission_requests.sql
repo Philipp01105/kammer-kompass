@@ -5,13 +5,10 @@ INSERT INTO permission_requests (
   requested_role_template_id,
   requested_scope_type,
   requested_scope_id,
-  proof_file_name,
-  proof_mime_type,
-  proof_content_base64,
   proof_note,
   status
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending')
+VALUES ($1, $2, $3, $4, $5, $6,  'pending')
 RETURNING *;
 
 -- name: ExistsPendingPermissionRequest :one
@@ -35,9 +32,6 @@ SELECT
   pr.requested_role_template_id,
   rt.name AS requested_role_name,
   pr.requested_scope_type,
-  pr.requested_scope_id,
-  pr.proof_file_name,
-  pr.proof_mime_type,
   pr.proof_note,
   pr.status,
   pr.created_at
@@ -60,9 +54,6 @@ SELECT
   rt.allow_mask AS requested_allow_mask,
   pr.requested_scope_type,
   pr.requested_scope_id,
-  pr.proof_file_name,
-  pr.proof_mime_type,
-  pr.proof_content_base64,
   pr.proof_note,
   pr.status,
   pr.reviewed_by,

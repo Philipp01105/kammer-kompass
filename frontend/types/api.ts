@@ -217,8 +217,6 @@ export type PermissionRequestListItem = {
   requestedRoleName: string;
   requestedScopeType: "global" | "state" | "ihk";
   requestedScopeId?: string | null;
-  proofFileName?: string | null;
-  proofMimeType?: string | null;
   proofNote?: string | null;
   status: "pending" | "approved" | "rejected";
   createdAt: string;
@@ -234,7 +232,6 @@ export type PermissionRequestActivity = {
 
 export type PermissionRequestDetail = PermissionRequestListItem & {
   requestedAllowMask: number;
-  proofContentBase64?: string | null;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
   decisionNote?: string | null;

@@ -109,9 +109,6 @@ type PermissionRequest struct {
 	RequestedRoleTemplateID pgtype.UUID        `json:"requested_role_template_id"`
 	RequestedScopeType      string             `json:"requested_scope_type"`
 	RequestedScopeID        *string            `json:"requested_scope_id"`
-	ProofFileName           *string            `json:"proof_file_name"`
-	ProofMimeType           *string            `json:"proof_mime_type"`
-	ProofContentBase64      *string            `json:"proof_content_base64"`
 	ProofNote               *string            `json:"proof_note"`
 	Status                  string             `json:"status"`
 	ReviewedBy              pgtype.UUID        `json:"reviewed_by"`

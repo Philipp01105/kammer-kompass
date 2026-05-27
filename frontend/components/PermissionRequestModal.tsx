@@ -17,9 +17,6 @@ const schema = z.object({
   requestedRoleTemplateId: z.string().uuid("Bitte Rolle auswählen."),
   requestedScopeType: z.enum(["global", "state", "ihk"]),
   requestedScopeId: z.string().max(200).optional(),
-  proofFileName: z.string().max(255).optional(),
-  proofMimeType: z.string().max(100).optional(),
-  proofContentBase64: z.string().max(2_000_000).optional(),
   proofNote: z.string().max(2000).optional(),
 });
 
@@ -43,9 +40,6 @@ export function PermissionRequestModal({
       requestedRoleTemplateId: "",
       requestedScopeType: "state",
       requestedScopeId: "",
-      proofFileName: "",
-      proofMimeType: "",
-      proofContentBase64: "",
       proofNote: "",
     },
   });
@@ -55,9 +49,6 @@ export function PermissionRequestModal({
       adminApi.requestPermissions({
         ...values,
         requestedScopeId: values.requestedScopeType === "global" ? undefined : values.requestedScopeId || undefined,
-        proofFileName: values.proofFileName || undefined,
-        proofMimeType: values.proofMimeType || undefined,
-        proofContentBase64: values.proofContentBase64 || undefined,
         proofNote: values.proofNote || undefined,
       }),
   });
@@ -92,18 +83,6 @@ export function PermissionRequestModal({
             <Input {...form.register("requestedScopeId")} />
           </Field>
         ) : null}
-        <Field label="Nachweis-Dateiname, optional" error={form.formState.errors.proofFileName?.message}>
-          <Input
-            type="file"
-            accept="application/pdf,image/jpeg,image/png,image/webp"
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
-              form.setValue("proofFileName", file?.name ?? "");
-              form.setValue("proofMimeType", file?.type ?? "");
-              form.setValue("proofContentBase64", file ? await fileToBase64(file) : "");
-            }}
-          />
-        </Field>
         <Field label="Nachweis / Begründung, optional" error={form.formState.errors.proofNote?.message}>
           <Textarea {...form.register("proofNote")} />
         </Field>

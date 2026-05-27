@@ -458,9 +458,6 @@ components:
         requestedScopeId:
           type: string
           description: Required for state and ihk scopes.
-        proofFileName: { type: string, maxLength: 255 }
-        proofMimeType: { type: string, maxLength: 100 }
-        proofContentBase64: { type: string, maxLength: 2000000 }
         proofNote: { type: string, maxLength: 2000 }
     PermissionRequestSubmitRequest:
       type: object
@@ -471,9 +468,6 @@ components:
         requestedScopeId:
           type: string
           description: Required for state and ihk scopes.
-        proofFileName: { type: string, maxLength: 255 }
-        proofMimeType: { type: string, maxLength: 100 }
-        proofContentBase64: { type: string, maxLength: 2000000 }
         proofNote: { type: string, maxLength: 2000 }
     PermissionRequestDecisionRequest:
       type: object

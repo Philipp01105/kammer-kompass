@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -17,16 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
-
-// 2 mebibytes
-const maxProofUploadBytes = 2 * 1024 * 1024
-
-var allowedProofMimeTypes = map[string]bool{
-	"application/pdf": true,
-	"image/jpeg":      true,
-	"image/png":       true,
-	"image/webp":      true,
-}
 
 type Handler struct {
 	store      *Store
@@ -57,9 +46,6 @@ type registerRequest struct {
 	RequestedRoleTemplate string  `json:"requestedRoleTemplateId" validate:"omitempty,uuid"`
 	RequestedScopeType    string  `json:"requestedScopeType" validate:"omitempty,oneof=global state ihk"`
 	RequestedScopeID      *string `json:"requestedScopeId" validate:"omitempty,max=200"`
-	ProofFileName         *string `json:"proofFileName" validate:"omitempty,max=255"`
-	ProofMimeType         *string `json:"proofMimeType" validate:"omitempty,max=100"`
-	ProofContentBase64    *string `json:"proofContentBase64" validate:"omitempty,max=2000000"`
 	ProofNote             *string `json:"proofNote" validate:"omitempty,max=2000"`
 }
 
@@ -74,17 +60,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	req.RequestedRoleTemplate = strings.TrimSpace(req.RequestedRoleTemplate)
 	req.RequestedScopeType = strings.TrimSpace(req.RequestedScopeType)
 	req.RequestedScopeID = optionalTrimmedString(req.RequestedScopeID)
-	req.ProofFileName = optionalTrimmedString(req.ProofFileName)
-	req.ProofMimeType = optionalTrimmedString(req.ProofMimeType)
-	req.ProofContentBase64 = optionalTrimmedString(req.ProofContentBase64)
 	req.ProofNote = optionalTrimmedString(req.ProofNote)
 
 	if err := h.validate.Struct(req); err != nil {
 		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Invalid input"})
-		return
-	}
-	if err := validateProofUpload(req.ProofMimeType, req.ProofContentBase64); err != nil {
-		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": err.Error()})
 		return
 	}
 	requestsRights := req.RequestedRoleTemplate != ""
@@ -120,7 +99,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 	var user User
 	if requestsRights {
-		user, err = h.store.RegisterUserWithPermissionRequest(r.Context(), req.Email, req.DisplayName, string(pwHash), req.RequestedRoleTemplate, req.RequestedScopeType, req.RequestedScopeID, req.ProofFileName, req.ProofMimeType, req.ProofContentBase64, req.ProofNote)
+		user, err = h.store.RegisterUserWithPermissionRequest(r.Context(), req.Email, req.DisplayName, string(pwHash), req.RequestedRoleTemplate, req.RequestedScopeType, req.RequestedScopeID, req.ProofNote)
 	} else {
 		user, err = h.store.RegisterUser(r.Context(), req.Email, req.DisplayName, string(pwHash))
 	}
@@ -163,9 +142,6 @@ type permissionRequestRequest struct {
 	RequestedRoleTemplate string  `json:"requestedRoleTemplateId" validate:"required,uuid"`
 	RequestedScopeType    string  `json:"requestedScopeType" validate:"required,oneof=global state ihk"`
 	RequestedScopeID      *string `json:"requestedScopeId" validate:"omitempty,max=200"`
-	ProofFileName         *string `json:"proofFileName" validate:"omitempty,max=255"`
-	ProofMimeType         *string `json:"proofMimeType" validate:"omitempty,max=100"`
-	ProofContentBase64    *string `json:"proofContentBase64" validate:"omitempty,max=2000000"`
 	ProofNote             *string `json:"proofNote" validate:"omitempty,max=2000"`
 }
 
@@ -184,16 +160,9 @@ func (h *Handler) RequestPermissions(w http.ResponseWriter, r *http.Request) {
 	req.RequestedRoleTemplate = strings.TrimSpace(req.RequestedRoleTemplate)
 	req.RequestedScopeType = strings.TrimSpace(req.RequestedScopeType)
 	req.RequestedScopeID = optionalTrimmedString(req.RequestedScopeID)
-	req.ProofFileName = optionalTrimmedString(req.ProofFileName)
-	req.ProofMimeType = optionalTrimmedString(req.ProofMimeType)
-	req.ProofContentBase64 = optionalTrimmedString(req.ProofContentBase64)
 	req.ProofNote = optionalTrimmedString(req.ProofNote)
 	if err := h.validate.Struct(req); err != nil {
 		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Invalid input"})
-		return
-	}
-	if err := validateProofUpload(req.ProofMimeType, req.ProofContentBase64); err != nil {
-		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": err.Error()})
 		return
 	}
 	ipHash := security.Sha256Hex(netx.ClientIP(r) + h.secretSalt)
@@ -211,7 +180,7 @@ func (h *Handler) RequestPermissions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.CreatePermissionRequestForUser(r.Context(), userID, req.RequestedRoleTemplate, req.RequestedScopeType, req.RequestedScopeID, req.ProofFileName, req.ProofMimeType, req.ProofContentBase64, req.ProofNote); err != nil {
+	if err := h.store.CreatePermissionRequestForUser(r.Context(), userID, req.RequestedRoleTemplate, req.RequestedScopeType, req.RequestedScopeID, req.ProofNote); err != nil {
 		if errors.Is(err, ErrPermissionRequestAlreadyPending) {
 			httpx.JSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "PERMISSION_REQUEST_ALREADY_PENDING", "message": "Für diese Rolle und diesen Scope liegt bereits eine offene Rechteanfrage vor."})
 			return
@@ -377,21 +346,4 @@ func optionalTrimmedString(value *string) *string {
 		return nil
 	}
 	return &trimmed
-}
-
-func validateProofUpload(mimeType *string, contentBase64 *string) error {
-	if contentBase64 == nil || *contentBase64 == "" {
-		return nil
-	}
-	if mimeType == nil || !allowedProofMimeTypes[*mimeType] {
-		return errors.New("nachweis-Dateityp ist nicht erlaubt. Erlaubt sind PDF, JPG, PNG und WebP")
-	}
-	decoded, err := base64.StdEncoding.DecodeString(*contentBase64)
-	if err != nil {
-		return errors.New("nachweis-Datei ist ungültig kodiert")
-	}
-	if len(decoded) > maxProofUploadBytes {
-		return errors.New("nachweis-Datei darf maximal 2 MB groß sein")
-	}
-	return nil
 }
