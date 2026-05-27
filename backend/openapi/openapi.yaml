@@ -1,0 +1,596 @@
+openapi: 3.1.0
+info:
+  title: IHK-Info-Plattform API
+  version: 0.1.0
+  description: Moderierte, versionierte Community-Datenbank fuer IHK-spezifische Informationen.
+servers:
+  - url: /api/v1
+paths:
+  /login:
+    post:
+      tags: [Auth]
+      summary: Per Secure Cookie Session anmelden
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200": { $ref: "#/components/responses/OK" }
+        "401": { description: Ungueltige Zugangsdaten }
+  /register:
+    post:
+      tags: [Auth]
+      summary: Nutzerkonto registrieren oder Registrierung mit Rechteanfrage einreichen
+      description: Ohne requestedRoleTemplateId wird ein normales Konto direkt aktiviert. Mit requestedRoleTemplateId wird der Nutzer inaktiv angelegt und muss von einem Admin geprüft werden.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201": { $ref: "#/components/responses/OK" }
+        "202": { $ref: "#/components/responses/OK" }
+        "409": { description: E-Mail existiert bereits }
+  /me:
+    get:
+      tags: [Auth]
+      summary: Aktuelle normale Session laden
+      responses:
+        "200": { description: Session-Nutzer }
+        "401": { description: Nicht angemeldet }
+  /role-templates:
+    get:
+      tags: [Auth, RBAC]
+      summary: Rollen laden, die Nutzer beantragen können
+      responses:
+        "200": { description: Rollenliste }
+  /permission-requests:
+    post:
+      tags: [Auth, RBAC]
+      summary: Eingeloggter Nutzer beantragt zusätzliche Rechte
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermissionRequestSubmitRequest"
+      responses:
+        "202": { $ref: "#/components/responses/OK" }
+        "409":
+          description: Rechte sind bereits vorhanden oder eine passende Anfrage ist noch offen
+  /public/ihks:
+    get:
+      tags: [Public]
+      summary: IHKs suchen und geprüfte Infos mit separaten Pending-Hinweisen laden
+      parameters:
+        - { name: query, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: includePending, in: query, schema: { type: boolean, default: true } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: IHK-Liste
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicIHKListResponse"
+  /public/ihks/{slug}:
+    get:
+      tags: [Public]
+      summary: IHK-Detailseite inklusive maximal 20 Pending-Hinweisen
+      parameters:
+        - { name: slug, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: IHK-Details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicIHK"
+        "404": { $ref: "#/components/responses/NotFound" }
+  /public/info-suggestions:
+    post:
+      tags: [Public]
+      summary: Info-Hinweis zu bestehender IHK einreichen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitInfoSuggestionRequest"
+      responses:
+        "200":
+          description: Eingereicht und als ungeprüfter Community-Hinweis sichtbar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OKMessage"
+        "400":
+          description: Validierung oder Vormoderation fehlgeschlagen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitError"
+              examples:
+                language:
+                  value: { ok: false, code: LANGUAGE_NOT_GERMAN, message: "Bitte reiche Hinweise auf Deutsch ein." }
+                wordFilter:
+                  value: { ok: false, code: WORD_FILTER_BLOCKED, message: "Dein Hinweis enthält Begriffe, die nicht öffentlich eingereicht werden können." }
+                html:
+                  value: { ok: false, code: HTML_BLOCKED, message: "Bitte entferne HTML oder Skripte." }
+                url:
+                  value: { ok: false, code: URL_BLOCKED, message: "Bitte entferne unsichere Links." }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    /admin/me:
+    get:
+      tags: [Admin]
+      summary: Aktuellen Admin-Nutzer und effektive Abilities laden
+      responses:
+        "200":
+          description: Nutzer und Admin-Abilities
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, user, effectiveMask, abilities]
+                properties:
+                  ok: { type: boolean }
+                  user: { type: object }
+                  effectiveMask: { type: integer, format: int64 }
+                  abilities:
+                    type: object
+                    required: [canHidePendingHints, canManageModerationTerms]
+                    properties:
+                      canHidePendingHints: { type: boolean }
+                      canManageModerationTerms: { type: boolean }
+                      canManagePermissionRequests: { type: boolean }
+  /admin/info-suggestions:
+    get:
+      tags: [Admin, InfoSuggestions]
+      summary: Info-Suggestion-Queue laden
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/SuggestionStatus" } }
+        - { name: ihkId, in: query, schema: { type: string, format: uuid } }
+        - { name: publicPendingVisible, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Queue }
+  /admin/info-suggestions/{id}:
+    get:
+      tags: [Admin, InfoSuggestions]
+      summary: Info-Suggestion mit IHK, Snapshot, Live-Text, Moderation und Review Events laden
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Detail }
+  /admin/info-suggestions/{id}/start-review:
+    post:
+      tags: [Admin, InfoSuggestions]
+      summary: submitted -> under_review; Public Pending bleibt sichtbar
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/info-suggestions/{id}/accept:
+    post:
+      tags: [Admin, InfoSuggestions]
+      summary: under_review -> accepted; Public Pending wird versteckt; Live-Daten bleiben unverändert
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/info-suggestions/{id}/reject:
+    post:
+      tags: [Admin, InfoSuggestions]
+      summary: under_review -> rejected; Public Pending wird versteckt
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/info-suggestions/{id}/needs-more-info:
+    post:
+      tags: [Admin, InfoSuggestions]
+      summary: under_review -> needs_more_info; Public Pending wird versteckt
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/info-suggestions/{id}/mark-spam:
+    post:
+      tags: [Admin, InfoSuggestions]
+      summary: any -> spam; Public Pending wird versteckt
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/info-suggestions/{id}/reopen:
+    post:
+      tags: [Admin, InfoSuggestions]
+      summary: needs_more_info/rejected -> under_review
+      description: Public Pending wird beim erneuten Oeffnen nicht automatisch wieder sichtbar.
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/info-suggestions/{id}/hide-pending:
+    post:
+      tags: [Admin, InfoSuggestions]
+      summary: Nur Public Pending verstecken; Status bleibt unverändert
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 2000 }
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/info-suggestions/{id}/apply:
+    post:
+      tags: [Admin, InfoSuggestions]
+      summary: Accepted Suggestion transaktional in Live-Text und Version übernehmen
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyInfoSuggestionRequest"
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/moderation-terms:
+    get:
+      tags: [Admin, ModerationTerms]
+      summary: Aktive Moderationsbegriffe laden
+      responses: { "200": { description: Liste } }
+    post:
+      tags: [Admin, ModerationTerms]
+      summary: Moderationsbegriff anlegen
+      responses: { "201": { $ref: "#/components/responses/OK" } }
+  /admin/moderation-terms/{id}:
+    patch:
+      tags: [Admin, ModerationTerms]
+      summary: Moderationsbegriff ändern
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+    delete:
+      tags: [Admin, ModerationTerms]
+      summary: Moderationsbegriff per Soft Delete deaktivieren
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/audit-logs:
+    get:
+      tags: [Admin, Audit]
+      summary: Audit Logs einsehen
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses: { "200": { description: Audit-Log-Liste } }
+  /admin/users:
+    get:
+      tags: [Admin, Users]
+      summary: Nutzer suchen und listen
+      parameters:
+        - { name: query, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses: { "200": { description: Nutzerliste } }
+    post:
+      tags: [Admin, Users]
+      summary: Nutzer anlegen und optional direkt eine Rolle zuweisen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminUserRequest"
+      responses:
+        "201": { $ref: "#/components/responses/OK" }
+  /admin/role-templates:
+    get:
+      tags: [Admin, Users]
+      summary: Rollen-Templates laden
+      responses: { "200": { description: Rollen-Templates } }
+  /admin/users/{id}/roles:
+    get:
+      tags: [Admin, Users]
+      summary: Rollen-Zuweisungen eines Nutzers laden
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { description: Rollen-Zuweisungen } }
+    post:
+      tags: [Admin, Users]
+      summary: Rolle zuweisen
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignUserRoleRequest"
+      responses: { "201": { $ref: "#/components/responses/OK" } }
+  /admin/users/{id}/roles/{assignmentId}:
+    delete:
+      tags: [Admin, Users]
+      summary: Rollen-Zuweisung widerrufen
+      parameters:
+        - { $ref: "#/components/parameters/ID" }
+        - name: assignmentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/permission-requests:
+    get:
+      tags: [Admin, RBAC]
+      summary: Rechteanfragen und Registrierungen mit Rechtewunsch prüfen
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, approved, rejected] } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+      responses: { "200": { description: Rechteanfragen-Liste } }
+  /admin/permission-requests/{id}:
+    get:
+      tags: [Admin, RBAC]
+      summary: Rechteanfrage mit Nutzeraktivität laden
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { description: Rechteanfrage-Detail } }
+  /admin/permission-requests/{id}/approve:
+    post:
+      tags: [Admin, RBAC]
+      summary: Rechteanfrage akzeptieren, Rolle zuweisen und E-Mail senden
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermissionRequestDecisionRequest"
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/permission-requests/{id}/reject:
+    post:
+      tags: [Admin, RBAC]
+      summary: Rechteanfrage ablehnen und bei Registrierungsanfragen den Nutzer löschen
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermissionRequestDecisionRequest"
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/ihks:
+    get:
+      tags: [Admin, IHKs]
+      summary: IHKs administrativ suchen und listen
+      parameters:
+        - { name: query, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses: { "200": { description: IHK-Liste } }
+  /admin/ihks/{id}:
+    patch:
+      tags: [Admin, IHKs]
+      summary: IHK-Stammdaten bearbeiten; nur globale super_admin Rolle
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAdminIHKRequest"
+      responses:
+        "200": { $ref: "#/components/responses/OK" }
+  /admin/ihks/{id}/info/versions:
+    get:
+      tags: [Admin, IHKs]
+      summary: Versionen einer IHK-Info laden
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      responses: { "200": { description: Versionsliste } }
+  /admin/ihks/{id}/info/publish:
+    post:
+      tags: [Admin, IHKs]
+      summary: Live-Info direkt ohne Review-Prozess veroeffentlichen
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishIHKInfoRequest"
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+  /admin/ihks/{id}/info/rollback:
+    post:
+      tags: [Admin, IHKs]
+      summary: Live-Info auf eine fruehere Version zurueckrollen und neue Version erzeugen
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RollbackIHKInfoRequest"
+      responses: { "200": { $ref: "#/components/responses/OK" } }
+components:
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    OK:
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/OK"
+    NotFound:
+      description: Nicht gefunden
+    RateLimited:
+      description: Rate Limit erreicht
+  schemas:
+    OK:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+    OKMessage:
+      type: object
+      required: [ok, message]
+      properties:
+        ok: { type: boolean }
+        message: { type: string }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          description: E-Mail-Adresse oder super_admin beim initialen technischen Zugang.
+          maxLength: 320
+        password: { type: string, minLength: 1, maxLength: 256 }
+    RegisterRequest:
+      type: object
+      required: [email, displayName, password]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        displayName: { type: string, minLength: 2, maxLength: 100 }
+        password: { type: string, minLength: 10, maxLength: 256 }
+        requestedRoleTemplateId:
+          type: string
+          format: uuid
+          description: Wenn gesetzt, wird eine Admin-Prüfung statt direkter Aktivierung gestartet.
+        requestedScopeType: { type: string, enum: [global, state, ihk] }
+        requestedScopeId:
+          type: string
+          description: Required for state and ihk scopes.
+        proofFileName: { type: string, maxLength: 255 }
+        proofMimeType: { type: string, maxLength: 100 }
+        proofContentBase64: { type: string, maxLength: 2000000 }
+        proofNote: { type: string, maxLength: 2000 }
+    PermissionRequestSubmitRequest:
+      type: object
+      required: [requestedRoleTemplateId, requestedScopeType]
+      properties:
+        requestedRoleTemplateId: { type: string, format: uuid }
+        requestedScopeType: { type: string, enum: [global, state, ihk] }
+        requestedScopeId:
+          type: string
+          description: Required for state and ihk scopes.
+        proofFileName: { type: string, maxLength: 255 }
+        proofMimeType: { type: string, maxLength: 100 }
+        proofContentBase64: { type: string, maxLength: 2000000 }
+        proofNote: { type: string, maxLength: 2000 }
+    PermissionRequestDecisionRequest:
+      type: object
+      properties:
+        note: { type: string, maxLength: 2000 }
+    SubmitError:
+      type: object
+      required: [ok, message]
+      properties:
+        ok: { type: boolean, const: false }
+        code:
+          type: string
+          enum: [LANGUAGE_NOT_GERMAN, WORD_FILTER_BLOCKED, HTML_BLOCKED, URL_BLOCKED, LENGTH_BLOCKED]
+        message: { type: string }
+    PublicIHKListResponse:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicIHK"
+        nextCursor:
+          type: [string, "null"]
+    PublicIHK:
+      type: object
+      required: [id, name, slug, state, info, pendingHints]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        city: { type: [string, "null"] }
+        state: { type: string }
+        officialUrl: { type: [string, "null"], format: uri }
+        info:
+          type: object
+          required: [currentText, confidenceLevel, updatedAt]
+          properties:
+            currentText: { type: string, description: Geprüfter Live-Infotext, Markdown erlaubt }
+            confidenceLevel: { type: string, enum: [low, medium, high] }
+            sourceSummary: { type: [string, "null"] }
+            updatedAt: { type: string, format: date-time }
+        pendingHints:
+          type: array
+          description: Ungeprüfte Community-Hinweise; immer getrennt vom geprüften Live-Infotext anzeigen.
+          items:
+            $ref: "#/components/schemas/PendingHint"
+    PendingHint:
+      type: object
+      required: [id, publicPendingText, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        publicPendingText: { type: string, description: Plain Text, nicht als Markdown rendern }
+        sourceUrl: { type: [string, "null"], format: uri }
+        sourceNote: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    SubmitInfoSuggestionRequest:
+      type: object
+      required: [ihkId, suggestedChange, honeypot]
+      properties:
+        ihkId: { type: string, format: uuid }
+        suggestedChange: { type: string, minLength: 20, maxLength: 3000 }
+        reason: { type: string, maxLength: 2000 }
+        sourceUrl: { type: string, format: uri }
+        sourceNote: { type: string, maxLength: 2000 }
+        submittedEmail: { type: string, format: email }
+        honeypot: { type: string, maxLength: 0 }
+    ApplyInfoSuggestionRequest:
+      type: object
+      required: [newText, confidenceLevel, changeSummary]
+      properties:
+        newText: { type: string, maxLength: 20000 }
+        confidenceLevel: { type: string, enum: [low, medium, high] }
+        sourceSummary: { type: string, maxLength: 2000 }
+        changeSummary: { type: string, maxLength: 2000 }
+    UpdateAdminIHKRequest:
+      type: object
+      properties:
+        officialUrl: { type: [string, "null"], format: uri, maxLength: 2000 }
+    PublishIHKInfoRequest:
+      type: object
+      required: [newText, confidenceLevel, changeSummary]
+      properties:
+        newText: { type: string, minLength: 1, maxLength: 20000 }
+        confidenceLevel: { type: string, enum: [low, medium, high] }
+        sourceSummary: { type: string, maxLength: 2000 }
+        changeSummary: { type: string, maxLength: 2000 }
+    RollbackIHKInfoRequest:
+      type: object
+      required: [versionId, changeSummary]
+      properties:
+        versionId: { type: string, format: uuid }
+        confidenceLevel: { type: string, enum: [low, medium, high] }
+        sourceSummary: { type: string, maxLength: 2000 }
+        changeSummary: { type: string, maxLength: 2000 }
+    AssignUserRoleRequest:
+      type: object
+      required: [roleTemplateId, scopeType]
+      properties:
+        roleTemplateId: { type: string, format: uuid }
+        scopeType: { type: string, enum: [global, state, ihk] }
+        scopeId:
+          type: string
+          description: Required for state and ihk scopes; omitted for global scope.
+        expiresAt: { type: string, format: date-time }
+    CreateAdminUserRequest:
+      type: object
+      required: [email, displayName, password]
+      properties:
+        email: { type: string, format: email, maxLength: 320 }
+        displayName: { type: string, minLength: 2, maxLength: 100 }
+        password: { type: string, minLength: 10, maxLength: 256 }
+        roleTemplateId: { type: string, format: uuid }
+        scopeType: { type: string, enum: [global, state, ihk] }
+        scopeId:
+          type: string
+          description: Required for state and ihk scopes when roleTemplateId is provided.
+    SuggestionStatus:
+      type: string
+      enum: [submitted, under_review, needs_more_info, accepted, rejected, applied, archived, spam]

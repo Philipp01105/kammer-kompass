@@ -1,0 +1,67 @@
+@import "tailwindcss";
+@config "../tailwind.config.mjs";
+
+:root {
+  --background: 222 31% 7%;
+  --foreground: 210 40% 96%;
+  --card: 221 28% 11%;
+  --card-foreground: 210 40% 96%;
+  --primary: 205 100% 46%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 216 22% 18%;
+  --secondary-foreground: 210 40% 96%;
+  --muted: 219 22% 15%;
+  --muted-foreground: 213 18% 72%;
+  --destructive: 0 72% 52%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 216 22% 24%;
+  --input: 216 22% 24%;
+  --ring: 205 100% 56%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+a {
+  text-underline-offset: 3px;
+}
+
+::selection {
+  background: hsl(var(--primary) / 0.35);
+}
+
+.prose-lite {
+  line-height: 1.7;
+}
+
+.prose-lite h1,
+.prose-lite h2,
+.prose-lite h3 {
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose-lite p,
+.prose-lite ul,
+.prose-lite ol {
+  margin-bottom: 0.75rem;
+}
+
+.prose-lite ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.prose-lite ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
