@@ -41,17 +41,7 @@ export default function PermissionRequestDetailPage() {
               <Info label="Typ" value={item.requestType === "registration" ? "Registrierung mit Rechten" : "Rechteanfrage"} />
               <Info label="Rolle" value={item.requestedRoleName} />
               <Info label="Scope" value={`${item.requestedScopeType}${item.requestedScopeId ? `: ${item.requestedScopeId}` : ""}`} />
-              <Info label="Nachweis-Datei" value={item.proofFileName || "-"} />
             </dl>
-            {item.proofContentBase64 ? (
-              <a
-                className="mt-4 inline-flex underline"
-                href={`data:${item.proofMimeType || "application/octet-stream"};base64,${item.proofContentBase64}`}
-                download={item.proofFileName || "nachweis"}
-              >
-                Nachweis öffnen
-              </a>
-            ) : null}
             {item.proofNote ? (
               <div className="mt-5">
                 <h3 className="font-medium">Nachweis / Begründung</h3>

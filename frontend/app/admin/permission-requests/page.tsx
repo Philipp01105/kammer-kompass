@@ -55,7 +55,7 @@ export default function PermissionRequestsPage() {
                   {item.requestedScopeType}
                   {item.requestedScopeId ? `: ${item.requestedScopeId}` : ""}
                 </td>
-                <td className="p-3">{item.proofFileName || item.proofNote || "-"}</td>
+                <td className="p-3">{item.proofNote || "-"}</td>
                 <td className="p-3">
                   <div className="flex flex-wrap gap-2">
                     <Link className="underline" href={`/admin/permission-requests/${item.id}`}>
