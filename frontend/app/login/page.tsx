@@ -27,9 +27,6 @@ const signupSchema = z.object({
   requestedRoleTemplateId: z.string().optional(),
   requestedScopeType: z.enum(["global", "state", "ihk"]),
   requestedScopeId: z.string().max(200).optional(),
-  proofFileName: z.string().max(255).optional(),
-  proofMimeType: z.string().max(100).optional(),
-  proofContentBase64: z.string().max(2_000_000).optional(),
   proofNote: z.string().max(2000).optional(),
 }).superRefine((value, ctx) => {
   if (!value.requestRights) return;
@@ -67,9 +64,6 @@ export default function LoginPage() {
       requestedRoleTemplateId: "",
       requestedScopeType: "state",
       requestedScopeId: "",
-      proofFileName: "",
-      proofMimeType: "",
-      proofContentBase64: "",
       proofNote: "",
     },
   });
@@ -183,9 +177,6 @@ export default function LoginPage() {
                     values.requestRights && values.requestedScopeType !== "global"
                       ? values.requestedScopeId || undefined
                       : undefined,
-                  proofFileName: values.requestRights ? values.proofFileName || undefined : undefined,
-                  proofMimeType: values.requestRights ? values.proofMimeType || undefined : undefined,
-                  proofContentBase64: values.requestRights ? values.proofContentBase64 || undefined : undefined,
                   proofNote: values.requestRights ? values.proofNote || undefined : undefined,
                 })
               )}
@@ -235,18 +226,7 @@ export default function LoginPage() {
                       <Input {...signupForm.register("requestedScopeId")} />
                     </Field>
                   ) : null}
-                  <Field label="Nachweis-Datei, optional" error={signupForm.formState.errors.proofFileName?.message}>
-                    <Input
-                      type="file"
-                      accept="application/pdf,image/jpeg,image/png,image/webp"
-                      onChange={async (event) => {
-                        const file = event.target.files?.[0];
-                        signupForm.setValue("proofFileName", file?.name ?? "");
-                        signupForm.setValue("proofMimeType", file?.type ?? "");
-                        signupForm.setValue("proofContentBase64", file ? await fileToBase64(file) : "");
-                      }}
-                    />
-                  </Field>
+
                   <Field label="Nachweis / Begründung, optional" error={signupForm.formState.errors.proofNote?.message}>
                     <Textarea {...signupForm.register("proofNote")} />
                   </Field>
