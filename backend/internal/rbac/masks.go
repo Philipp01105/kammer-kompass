@@ -73,7 +73,21 @@ var AdminMask = PermPublicRead |
 	PermAuditWrite |
 	PermSpamModerate
 
-var SuperAdminMask = ^Permission(0)
+// AllPermissions is the explicit union of every defined permission bit.
+// SuperAdminMask is derived from this — update here when adding new permission constants
+// so the DB stores a non-negative value and the API returns a meaningful positive mask.
+var AllPermissions = PermPublicRead | PermIHKRead | PermIHKCreate | PermIHKUpdate | PermIHKDelete |
+	PermInfoRead | PermInfoSuggest | PermInfoPublish | PermInfoRollback |
+	PermVersionRead | PermVersionCreate |
+	PermInfoSuggestionRead | PermInfoSuggestionComment | PermInfoSuggestionTriage |
+	PermInfoSuggestionAccept | PermInfoSuggestionReject | PermInfoSuggestionApply |
+	PermPendingHintRead | PermPendingHintHide | PermPendingHintModerate |
+	PermModerationTermRead | PermModerationTermCreate | PermModerationTermUpdate | PermModerationTermDelete |
+	PermUserRead | PermUserUpdate | PermRoleAssign | PermRoleRevoke |
+	PermAuditRead | PermAuditWrite |
+	PermSpamModerate | PermLockOverride | PermSystemAdmin
+
+var SuperAdminMask = AllPermissions
 
 func RoleTemplateDefinitions() []RoleTemplateDefinition {
 	return []RoleTemplateDefinition{

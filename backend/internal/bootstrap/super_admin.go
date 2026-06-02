@@ -2,8 +2,6 @@ package bootstrap
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 
 	"github.com/Philipp01105/kammer-kompass/backend/internal/db/sqlc"
@@ -13,17 +11,20 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// creates the default super admin, password will get logged to stdout
+// EnsureDefaultSuperAdmin creates the default super admin only when explicitly
+// configured by the operator. The bootstrap password is never logged.
 
 const defaultSuperAdminEmail = "super_admin@local.invalid"
 const defaultSuperAdminUsername = "super_admin"
 
 type DefaultSuperAdminCredentials struct {
 	Username string
-	Password string
 }
 
-func EnsureDefaultSuperAdmin(ctx context.Context, db *pgxpool.Pool) (*DefaultSuperAdminCredentials, error) {
+func EnsureDefaultSuperAdmin(ctx context.Context, db *pgxpool.Pool, password string) (*DefaultSuperAdminCredentials, error) {
+	if password == "" {
+		return nil, errors.New("bootstrap password is required")
+	}
 	q := sqlc.New(db)
 
 	role, err := q.GetRoleTemplateByName(ctx, "super_admin")
@@ -31,7 +32,7 @@ func EnsureDefaultSuperAdmin(ctx context.Context, db *pgxpool.Pool) (*DefaultSup
 		return nil, err
 	}
 
-	user, created, password, err := ensureDefaultUser(ctx, q)
+	user, created, err := ensureDefaultUser(ctx, q, password)
 	if err != nil {
 		return nil, err
 	}
@@ -60,26 +61,20 @@ func EnsureDefaultSuperAdmin(ctx context.Context, db *pgxpool.Pool) (*DefaultSup
 	}
 	return &DefaultSuperAdminCredentials{
 		Username: defaultSuperAdminUsername,
-		Password: password,
 	}, nil
 }
 
-func ensureDefaultUser(ctx context.Context, q *sqlc.Queries) (sqlc.User, bool, string, error) {
+func ensureDefaultUser(ctx context.Context, q *sqlc.Queries, password string) (sqlc.User, bool, error) {
 	user, err := q.GetUserByEmail(ctx, defaultSuperAdminEmail)
 	if err == nil {
-		return user, false, "", nil
+		return user, false, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return sqlc.User{}, false, "", err
-	}
-
-	password, err := randomPassword()
-	if err != nil {
-		return sqlc.User{}, false, "", err
+		return sqlc.User{}, false, err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return sqlc.User{}, false, "", err
+		return sqlc.User{}, false, err
 	}
 
 	user, err = q.CreateUser(ctx, sqlc.CreateUserParams{
@@ -88,9 +83,9 @@ func ensureDefaultUser(ctx context.Context, q *sqlc.Queries) (sqlc.User, bool, s
 		PasswordHash: string(hash),
 	})
 	if err != nil {
-		return sqlc.User{}, false, "", err
+		return sqlc.User{}, false, err
 	}
-	return user, true, password, nil
+	return user, true, nil
 }
 
 func hasGlobalRole(ctx context.Context, db *pgxpool.Pool, userID pgtype.UUID, roleID pgtype.UUID) (bool, error) {
@@ -104,12 +99,4 @@ func hasGlobalRole(ctx context.Context, db *pgxpool.Pool, userID pgtype.UUID, ro
 		)
 	`, userID, roleID).Scan(&exists)
 	return exists, err
-}
-
-func randomPassword() (string, error) {
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
