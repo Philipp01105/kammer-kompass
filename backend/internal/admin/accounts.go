@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -169,11 +168,20 @@ func (s *accountService) UpdateUserStatus(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if !s.canChangeUserStatus(r, actorUserID, targetID, req.IsActive) {
+		httpx.JSON(w, http.StatusForbidden, map[string]any{"ok": false, "message": "Forbidden"})
+		return
+	}
+
 	updated, err := s.q.SetUserActive(r.Context(), sqlc.SetUserActiveParams{
 		ID:       pgtype.UUID{Bytes: targetID, Valid: true},
 		IsActive: req.IsActive,
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.JSON(w, http.StatusNotFound, map[string]any{"ok": false, "message": "User not found"})
+			return
+		}
 		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
 		return
 	}
@@ -199,6 +207,36 @@ func (s *accountService) UpdateUserStatus(w http.ResponseWriter, r *http.Request
 	})
 }
 
+func (s *accountService) canChangeUserStatus(r *http.Request, actorUserID string, targetID uuid.UUID, isActive bool) bool {
+	isSelf := strings.EqualFold(strings.TrimSpace(actorUserID), targetID.String())
+	disabling := !isActive
+	if !canChangeUserStatus(isSelf, disabling, false, false) {
+		return false
+	}
+	if !s.hasGlobalRole(r.Context(), targetID.String(), "super_admin") {
+		return true
+	}
+	return canChangeUserStatus(isSelf, disabling, s.actorHasSuperAdminProtection(r, actorUserID), true)
+}
+
+func canChangeUserStatus(isSelf bool, disabling bool, actorIsProtectedSuperAdmin bool, targetIsSuperAdmin bool) bool {
+	if isSelf && disabling {
+		return false
+	}
+	if targetIsSuperAdmin && !actorIsProtectedSuperAdmin {
+		return false
+	}
+	return true
+}
+
+func (s *accountService) actorHasSuperAdminProtection(r *http.Request, actorUserID string) bool {
+	mask, err := s.rbac.EffectiveMask(r.Context(), actorUserID, rbac.ResourceScope{})
+	if err != nil || !rbac.HasAll(mask, rbac.PermSystemAdmin) {
+		return false
+	}
+	return s.hasGlobalRole(r.Context(), actorUserID, "super_admin")
+}
+
 type createUserRequest struct {
 	Email          string  `json:"email" validate:"required,email,max=320"`
 	DisplayName    string  `json:"displayName" validate:"required,min=2,max=100"`
@@ -209,7 +247,7 @@ type createUserRequest struct {
 }
 
 func (s *accountService) CreateUser(w http.ResponseWriter, r *http.Request) {
-	if !s.requireGlobal(w, r, rbac.PermUserRead|rbac.PermUserUpdate|rbac.PermAuditWrite) {
+	if !s.requireSuperAdmin(w, r, rbac.PermSystemAdmin|rbac.PermUserRead|rbac.PermUserUpdate|rbac.PermAuditWrite) {
 		return
 	}
 	actorUserID, _ := appmw.UserID(r)
@@ -517,262 +555,4 @@ func (s *accountService) RevokeUserRole(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-// ListPermissionRequests reviews self-service registration and role requests
-func (s *accountService) ListPermissionRequests(w http.ResponseWriter, r *http.Request) {
-	if !s.requireGlobal(w, r, rbac.ActionAssignRole) {
-		return
-	}
-	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	var statusPtr *string
-	if status != "" {
-		statusPtr = &status
-	}
-	limit := 50
-	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
-	}
-
-	rows, err := s.q.ListPermissionRequests(r.Context(), sqlc.ListPermissionRequestsParams{
-		Status: statusPtr,
-		Limit:  int32(limit),
-	})
-	if err != nil {
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-	items := make([]any, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, map[string]any{
-			"id":                      uuid.UUID(row.ID.Bytes).String(),
-			"userId":                  uuid.UUID(row.UserID.Bytes).String(),
-			"email":                   row.Email,
-			"displayName":             row.DisplayName,
-			"requestType":             row.RequestType,
-			"requestedRoleTemplateId": uuid.UUID(row.RequestedRoleTemplateID.Bytes).String(),
-			"requestedRoleName":       row.RequestedRoleName,
-			"requestedScopeType":      row.RequestedScopeType,
-			"proofNote":               row.ProofNote,
-			"status":                  row.Status,
-			"createdAt":               row.CreatedAt.Time.UTC().Format(time.RFC3339),
-		})
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
-}
-
-func (s *accountService) GetPermissionRequest(w http.ResponseWriter, r *http.Request) {
-	if !s.requireGlobal(w, r, rbac.ActionAssignRole) {
-		return
-	}
-	id, ok := parseURLUUID(w, r, "id")
-	if !ok {
-		return
-	}
-	row, err := s.q.GetPermissionRequestByID(r.Context(), pgtype.UUID{Bytes: id, Valid: true})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.JSON(w, http.StatusNotFound, map[string]any{"ok": false, "message": "Not found"})
-			return
-		}
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-	activities, err := s.permissionRequestActivity(r.Context(), row.UserID)
-	if err != nil {
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{
-		"id":                      uuid.UUID(row.ID.Bytes).String(),
-		"userId":                  uuid.UUID(row.UserID.Bytes).String(),
-		"email":                   row.Email,
-		"displayName":             row.DisplayName,
-		"requestType":             row.RequestType,
-		"requestedRoleTemplateId": uuid.UUID(row.RequestedRoleTemplateID.Bytes).String(),
-		"requestedRoleName":       row.RequestedRoleName,
-		"requestedAllowMask":      row.RequestedAllowMask,
-		"requestedScopeType":      row.RequestedScopeType,
-		"requestedScopeId":        row.RequestedScopeID,
-		"proofNote":               row.ProofNote,
-		"status":                  row.Status,
-		"reviewedBy":              uuidStringOrNil(row.ReviewedBy),
-		"reviewedAt":              timeOrNil(row.ReviewedAt),
-		"decisionNote":            row.DecisionNote,
-		"createdAt":               row.CreatedAt.Time.UTC().Format(time.RFC3339),
-		"updatedAt":               row.UpdatedAt.Time.UTC().Format(time.RFC3339),
-		"activities":              activities,
-	})
-}
-
-type permissionRequestDecisionRequest struct {
-	Note *string `json:"note" validate:"omitempty,max=2000"`
-}
-
-func (s *accountService) ApprovePermissionRequest(w http.ResponseWriter, r *http.Request) {
-	s.decidePermissionRequest(w, r, true)
-}
-
-func (s *accountService) RejectPermissionRequest(w http.ResponseWriter, r *http.Request) {
-	s.decidePermissionRequest(w, r, false)
-}
-
-// decidePermissionRequest applies the review decision atomically before audit logging
-// Registration rejections delete the pending account; approvals activate and grant the role
-func (s *accountService) decidePermissionRequest(w http.ResponseWriter, r *http.Request, approve bool) {
-	if !s.requireGlobal(w, r, rbac.ActionAssignRole) {
-		return
-	}
-	actorUserID, _ := appmw.UserID(r)
-	actorID, _ := uuid.Parse(actorUserID)
-	requestID, ok := parseURLUUID(w, r, "id")
-	if !ok {
-		return
-	}
-	var req permissionRequestDecisionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Invalid JSON"})
-		return
-	}
-	if req.Note != nil {
-		note := strings.TrimSpace(*req.Note)
-		req.Note = &note
-	}
-	if err := s.validate.Struct(req); err != nil {
-		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Invalid input"})
-		return
-	}
-
-	tx, err := s.db.BeginTx(r.Context(), pgx.TxOptions{})
-	if err != nil {
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
-	audittx := audit.NewWriter(qtx, s.secretSalt)
-
-	locked, err := qtx.LockPermissionRequestByID(r.Context(), pgtype.UUID{Bytes: requestID, Valid: true})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.JSON(w, http.StatusNotFound, map[string]any{"ok": false, "message": "Not found"})
-			return
-		}
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-	if locked.Status != "pending" {
-		httpx.JSON(w, http.StatusConflict, map[string]any{"ok": false, "message": "Request is already decided"})
-		return
-	}
-	if uuid.UUID(locked.UserID.Bytes).String() == actorUserID {
-		httpx.JSON(w, http.StatusForbidden, map[string]any{"ok": false, "message": "Cannot approve or reject your own request"})
-		return
-	}
-	user, err := qtx.GetUserByID(r.Context(), locked.UserID)
-	if err != nil {
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-	role, err := qtx.GetRoleTemplateByID(r.Context(), locked.RequestedRoleTemplateID)
-	if err != nil {
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-
-	if approve {
-		actorMask, err := s.rbac.EffectiveMask(r.Context(), actorUserID, rbac.ResourceScope{})
-		if err != nil {
-			httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-			return
-		}
-		if rbac.Permission(role.AllowMask)&^actorMask != 0 {
-			httpx.JSON(w, http.StatusForbidden, map[string]any{"ok": false, "message": "Cannot approve requests for roles with permissions you do not hold"})
-			return
-		}
-	}
-
-	status := "rejected"
-	if approve {
-		status = "approved"
-	}
-	if approve {
-		if locked.RequestType == "registration" {
-			if _, err := qtx.SetUserActiveVerified(r.Context(), sqlc.SetUserActiveVerifiedParams{
-				ID:         locked.UserID,
-				IsActive:   true,
-				IsVerified: true,
-			}); err != nil {
-				httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-				return
-			}
-		}
-		if _, err := qtx.CreateUserRoleAssignment(r.Context(), sqlc.CreateUserRoleAssignmentParams{
-			UserID:         locked.UserID,
-			RoleTemplateID: role.ID,
-			ScopeType:      locked.RequestedScopeType,
-			ScopeID:        locked.RequestedScopeID,
-			AllowMask:      role.AllowMask,
-			DenyMask:       0,
-			GrantedBy:      pgtype.UUID{Bytes: actorID, Valid: true},
-			ExpiresAt:      pgtype.Timestamptz{Valid: false},
-		}); err != nil {
-			httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-			return
-		}
-	}
-
-	if _, err := qtx.UpdatePermissionRequestDecision(r.Context(), sqlc.UpdatePermissionRequestDecisionParams{
-		ID:           locked.ID,
-		Status:       status,
-		ReviewedBy:   pgtype.UUID{Bytes: actorID, Valid: true},
-		DecisionNote: req.Note,
-	}); err != nil {
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-	if !approve && locked.RequestType == "registration" {
-		if err := qtx.DeleteUserByID(r.Context(), locked.UserID); err != nil {
-			httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-			return
-		}
-	}
-
-	if err := audittx.Log(r.Context(), r, actorUserID, "permission_request."+status, "permission_request", &requestID, ptr("global"), nil, nil, map[string]any{
-		"user_id": user.ID.Bytes,
-		"role":    role.Name,
-		"status":  status,
-	}); err != nil {
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Audit log write failed"})
-		return
-	}
-
-	if err := tx.Commit(r.Context()); err != nil {
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-// permissionRequestActivity returns recent public submissions by the requesting user
-func (s *accountService) permissionRequestActivity(ctx context.Context, userID pgtype.UUID) ([]any, error) {
-	var items []any
-	infoRows, err := s.q.ListPermissionRequestInfoSuggestions(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range infoRows {
-		id := uuid.UUID(row.ID.Bytes).String()
-		items = append(items, map[string]any{
-			"type":      "info_suggestion",
-			"id":        id,
-			"status":    row.Status,
-			"href":      "/admin/info-suggestions/" + id,
-			"createdAt": row.CreatedAt.Time.UTC().Format(time.RFC3339),
-		})
-	}
-	return items, nil
 }

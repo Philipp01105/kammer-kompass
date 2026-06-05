@@ -110,6 +110,18 @@ func (w *Writer) CreateReviewEvent(
 	return err
 }
 
+// Log writes an audit log entry. Callers must handle the returned error before
+// committing security-sensitive state changes.
+func (w *Writer) Log(ctx context.Context, r *http.Request, actorUserID, action, resourceType string, resourceID *uuid.UUID, scopeType, scopeID *string, oldValue, newValue any) error {
+	return w.CreateAuditLog(ctx, r, actorUserID, action, resourceType, resourceID, scopeType, scopeID, oldValue, newValue)
+}
+
+// LogReview writes a review event. Callers must handle the returned error
+// before committing security-sensitive state changes.
+func (w *Writer) LogReview(ctx context.Context, targetType string, targetID uuid.UUID, actorUserID, action string, oldStatus, newStatus, comment *string) error {
+	return w.CreateReviewEvent(ctx, targetType, targetID, actorUserID, action, oldStatus, newStatus, comment)
+}
+
 func parseUUID(s string) (uuid.UUID, bool) {
 	u, err := uuid.Parse(strings.TrimSpace(s))
 	if err != nil {
