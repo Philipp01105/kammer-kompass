@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/Philipp01105/kammer-kompass/backend/internal/netx"
 )
 
 func JSON(w http.ResponseWriter, status int, v any) {
@@ -31,7 +33,7 @@ func SlogAccessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 				"bytes", ww.BytesWritten(),
 				"duration_ms", time.Since(start).Milliseconds(),
 				"request_id", middleware.GetReqID(r.Context()),
-				"remote_ip", r.RemoteAddr,
+				"remote_ip", netx.ClientIP(r),
 			)
 		}
 		return http.HandlerFunc(fn)

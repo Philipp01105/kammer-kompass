@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Philipp01105/kammer-kompass/backend/internal/config"
 	"github.com/Philipp01105/kammer-kompass/backend/internal/httpx"
 	"github.com/Philipp01105/kammer-kompass/backend/internal/netx"
 	"github.com/Philipp01105/kammer-kompass/backend/internal/rate_limit"
@@ -25,10 +24,12 @@ type Handler struct {
 	secretSalt string
 }
 
-func NewHandler(db *pgxpool.Pool, sessionCfg config.SessionConfig, limiter *rate_limit.Limiter, secretSalt string) (*Handler, error) {
-	sessions, err := NewSessionManager(sessionCfg)
-	if err != nil {
-		return nil, err
+func NewHandler(db *pgxpool.Pool, sessions *SessionManager, limiter *rate_limit.Limiter, secretSalt string) (*Handler, error) {
+	if limiter == nil {
+		return nil, errors.New("rate limiter must not be nil")
+	}
+	if sessions == nil {
+		return nil, errors.New("session manager must not be nil")
 	}
 	return &Handler{
 		store:      NewStore(db),
@@ -37,180 +38,6 @@ func NewHandler(db *pgxpool.Pool, sessionCfg config.SessionConfig, limiter *rate
 		limiter:    limiter,
 		secretSalt: secretSalt,
 	}, nil
-}
-
-type registerRequest struct {
-	Email                 string  `json:"email" validate:"required,email,max=320"`
-	DisplayName           string  `json:"displayName" validate:"required,min=2,max=100"`
-	Password              string  `json:"password" validate:"required,min=10,max=256"`
-	RequestedRoleTemplate string  `json:"requestedRoleTemplateId" validate:"omitempty,uuid"`
-	RequestedScopeType    string  `json:"requestedScopeType" validate:"omitempty,oneof=global state ihk"`
-	RequestedScopeID      *string `json:"requestedScopeId" validate:"omitempty,max=200"`
-	ProofNote             *string `json:"proofNote" validate:"omitempty,max=2000"`
-}
-
-func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
-	var req registerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Invalid JSON"})
-		return
-	}
-	req.Email = strings.TrimSpace(req.Email)
-	req.DisplayName = strings.TrimSpace(req.DisplayName)
-	req.RequestedRoleTemplate = strings.TrimSpace(req.RequestedRoleTemplate)
-	req.RequestedScopeType = strings.TrimSpace(req.RequestedScopeType)
-	req.RequestedScopeID = optionalTrimmedString(req.RequestedScopeID)
-	req.ProofNote = optionalTrimmedString(req.ProofNote)
-
-	if err := h.validate.Struct(req); err != nil {
-		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Invalid input"})
-		return
-	}
-	requestsRights := req.RequestedRoleTemplate != ""
-	limitKey := "rl:auth:register:"
-	limitWindow := time.Hour
-	limitCount := 5
-	if requestsRights {
-		limitKey = "rl:auth:register_permission:"
-		limitWindow = 24 * time.Hour
-		limitCount = 3
-	}
-	if !h.allowRate(w, r, limitKey+security.Sha256Hex(netx.ClientIP(r)+h.secretSalt), limitWindow, limitCount) {
-		return
-	}
-	if requestsRights {
-		if req.RequestedScopeType == "" {
-			httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "requestedScopeType is required"})
-			return
-		}
-		if req.RequestedScopeType == "global" {
-			req.RequestedScopeID = nil
-		} else if req.RequestedScopeID == nil || *req.RequestedScopeID == "" {
-			httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "requestedScopeId is required for state and ihk scopes"})
-			return
-		}
-	}
-
-	pwHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-
-	var user User
-	if requestsRights {
-		user, err = h.store.RegisterUserWithPermissionRequest(r.Context(), req.Email, req.DisplayName, string(pwHash), req.RequestedRoleTemplate, req.RequestedScopeType, req.RequestedScopeID, req.ProofNote)
-	} else {
-		user, err = h.store.RegisterUser(r.Context(), req.Email, req.DisplayName, string(pwHash))
-	}
-	if err != nil {
-		if errors.Is(err, ErrEmailAlreadyExists) {
-			httpx.JSON(w, http.StatusConflict, map[string]any{"ok": false, "message": "Email already registered"})
-			return
-		}
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-
-	if requestsRights {
-		httpx.JSON(w, http.StatusAccepted, map[string]any{
-			"ok":      true,
-			"message": "Deine Registrierung wurde eingereicht und muss von einem Admin geprüft werden.",
-			"user": map[string]any{
-				"id":          user.ID,
-				"email":       user.Email,
-				"displayName": user.DisplayName,
-				"isVerified":  user.IsVerified,
-			},
-		})
-		return
-	}
-
-	_ = h.sessions.SetUserID(w, r, user.ID)
-	httpx.JSON(w, http.StatusCreated, map[string]any{
-		"ok": true,
-		"user": map[string]any{
-			"id":          user.ID,
-			"email":       user.Email,
-			"displayName": user.DisplayName,
-			"isVerified":  user.IsVerified,
-		},
-	})
-}
-
-type permissionRequestRequest struct {
-	RequestedRoleTemplate string  `json:"requestedRoleTemplateId" validate:"required,uuid"`
-	RequestedScopeType    string  `json:"requestedScopeType" validate:"required,oneof=global state ihk"`
-	RequestedScopeID      *string `json:"requestedScopeId" validate:"omitempty,max=200"`
-	ProofNote             *string `json:"proofNote" validate:"omitempty,max=2000"`
-}
-
-func (h *Handler) RequestPermissions(w http.ResponseWriter, r *http.Request) {
-	userID, ok := h.sessions.UserID(r)
-	if !ok {
-		httpx.JSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "message": "Not authenticated"})
-		return
-	}
-
-	var req permissionRequestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Invalid JSON"})
-		return
-	}
-	req.RequestedRoleTemplate = strings.TrimSpace(req.RequestedRoleTemplate)
-	req.RequestedScopeType = strings.TrimSpace(req.RequestedScopeType)
-	req.RequestedScopeID = optionalTrimmedString(req.RequestedScopeID)
-	req.ProofNote = optionalTrimmedString(req.ProofNote)
-	if err := h.validate.Struct(req); err != nil {
-		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "Invalid input"})
-		return
-	}
-	ipHash := security.Sha256Hex(netx.ClientIP(r) + h.secretSalt)
-	userHash := security.Sha256Hex(userID + h.secretSalt)
-	if !h.allowRate(w, r, "rl:auth:permission_request:ip:"+ipHash, 24*time.Hour, 5) {
-		return
-	}
-	if !h.allowRate(w, r, "rl:auth:permission_request:user:"+userHash, 24*time.Hour, 3) {
-		return
-	}
-	if req.RequestedScopeType == "global" {
-		req.RequestedScopeID = nil
-	} else if req.RequestedScopeID == nil || *req.RequestedScopeID == "" {
-		httpx.JSON(w, http.StatusBadRequest, map[string]any{"ok": false, "message": "requestedScopeId is required for state and ihk scopes"})
-		return
-	}
-
-	if err := h.store.CreatePermissionRequestForUser(r.Context(), userID, req.RequestedRoleTemplate, req.RequestedScopeType, req.RequestedScopeID, req.ProofNote); err != nil {
-		if errors.Is(err, ErrPermissionRequestAlreadyPending) {
-			httpx.JSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "PERMISSION_REQUEST_ALREADY_PENDING", "message": "Für diese Rolle und diesen Scope liegt bereits eine offene Rechteanfrage vor."})
-			return
-		}
-		if errors.Is(err, ErrPermissionAlreadyGranted) {
-			httpx.JSON(w, http.StatusConflict, map[string]any{"ok": false, "code": "PERMISSION_ALREADY_GRANTED", "message": "Du hast diese Rechte im gewählten Scope bereits."})
-			return
-		}
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-	httpx.JSON(w, http.StatusAccepted, map[string]any{"ok": true, "message": "Deine Rechteanfrage wurde eingereicht."})
-}
-
-func (h *Handler) ListRequestableRoleTemplates(w http.ResponseWriter, r *http.Request) {
-	roles, err := h.store.ListRequestableRoleTemplates(r.Context())
-	if err != nil {
-		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-		return
-	}
-	items := make([]any, 0, len(roles))
-	for _, role := range roles {
-		items = append(items, map[string]any{
-			"id":          role.ID,
-			"name":        role.Name,
-			"description": role.Description,
-			"allowMask":   role.AllowMask,
-		})
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 type loginRequest struct {
@@ -314,9 +141,6 @@ func (h *Handler) rejectFailedLogin(w http.ResponseWriter, r *http.Request, emai
 }
 
 func (h *Handler) allowRate(w http.ResponseWriter, r *http.Request, key string, window time.Duration, limit int) bool {
-	if h.limiter == nil {
-		return true
-	}
 	allowed, err := h.limiter.Allow(r.Context(), key, window, limit)
 	if err != nil {
 		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
@@ -330,11 +154,7 @@ func (h *Handler) allowRate(w http.ResponseWriter, r *http.Request, key string, 
 }
 
 func normalizeLoginIdentifier(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "super_admin" {
-		return "super_admin@local.invalid"
-	}
-	return value
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func optionalTrimmedString(value *string) *string {
