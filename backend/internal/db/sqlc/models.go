@@ -102,22 +102,6 @@ type ModerationTerm struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
-type PermissionRequest struct {
-	ID                      pgtype.UUID        `json:"id"`
-	UserID                  pgtype.UUID        `json:"user_id"`
-	RequestType             string             `json:"request_type"`
-	RequestedRoleTemplateID pgtype.UUID        `json:"requested_role_template_id"`
-	RequestedScopeType      string             `json:"requested_scope_type"`
-	RequestedScopeID        *string            `json:"requested_scope_id"`
-	ProofNote               *string            `json:"proof_note"`
-	Status                  string             `json:"status"`
-	ReviewedBy              pgtype.UUID        `json:"reviewed_by"`
-	ReviewedAt              pgtype.Timestamptz `json:"reviewed_at"`
-	DecisionNote            *string            `json:"decision_note"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
-}
-
 type ReviewEvent struct {
 	ID          pgtype.UUID        `json:"id"`
 	TargetType  string             `json:"target_type"`

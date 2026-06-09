@@ -13,6 +13,12 @@ SELECT id, email, display_name, password_hash, is_verified, is_active, created_a
 FROM users
 WHERE id = $1;
 
+-- name: SetUserActive :one
+UPDATE users
+SET is_active = $2
+WHERE id = $1
+RETURNING id, email, display_name, password_hash, is_verified, is_active, created_at, updated_at;
+
 -- name: ListUsers :many
 SELECT id, email, display_name, password_hash, is_verified, is_active, created_at, updated_at
 FROM users

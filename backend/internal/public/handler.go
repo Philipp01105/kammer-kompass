@@ -37,7 +37,10 @@ type Handler struct {
 	maxLinkCount int
 }
 
-func NewHandler(q *sqlc.Queries, limiter *rate_limit.Limiter, secretSalt string, detector moderation.LanguageDetector) *Handler {
+func NewHandler(q *sqlc.Queries, limiter *rate_limit.Limiter, secretSalt string, detector moderation.LanguageDetector) (*Handler, error) {
+	if limiter == nil {
+		return nil, errors.New("rate limiter must not be nil")
+	}
 	return &Handler{
 		q:            q,
 		validate:     validator.New(),
@@ -45,16 +48,26 @@ func NewHandler(q *sqlc.Queries, limiter *rate_limit.Limiter, secretSalt string,
 		secretSalt:   secretSalt,
 		langDetect:   detector,
 		maxLinkCount: 3,
-	}
+	}, nil
 }
 
 func (h *Handler) ListIHKs(w http.ResponseWriter, r *http.Request) {
+	ip := netx.ClientIP(r)
+	ipHash := security.Sha256Hex(ip + h.secretSalt)
+	if allowed, err := h.limiter.Allow(r.Context(), "rl:public:list_ihks:"+ipHash, time.Minute, 30); err != nil {
+		httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
+		return
+	} else if !allowed {
+		httpx.JSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "message": "Rate limit exceeded"})
+		return
+	}
+
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
 
-	includePending := true
+	includePending := false
 	if v := strings.TrimSpace(r.URL.Query().Get("includePending")); v != "" {
-		includePending = v != "false" && v != "0"
+		includePending = v == "true" || v == "1"
 	}
 
 	limit := 50
@@ -95,27 +108,38 @@ func (h *Handler) ListIHKs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pendingByIHK := map[pgtype.UUID][]any{}
+	if includePending && len(rows) > 0 {
+		ihkIDs := make([]pgtype.UUID, 0, len(rows))
+		for _, row := range rows {
+			ihkIDs = append(ihkIDs, row.ID)
+		}
+		hints, err := h.q.ListPendingHintsByIHKIDs(r.Context(), sqlc.ListPendingHintsByIHKIDsParams{
+			IhkIds:      ihkIDs,
+			PerIhkLimit: 5,
+		})
+		if err != nil {
+			httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
+			return
+		}
+		for _, hint := range hints {
+			pendingByIHK[hint.IhkID] = append(pendingByIHK[hint.IhkID], map[string]any{
+				"id":                uuidString(hint.ID),
+				"publicPendingText": hint.PublicPendingText,
+				"sourceUrl":         hint.SourceUrl,
+				"sourceNote":        hint.SourceNote,
+				"createdAt":         hint.CreatedAt.Time.UTC().Format(time.RFC3339),
+			})
+		}
+	}
+
 	items := make([]any, 0, len(rows))
 	for _, row := range rows {
 		pendingHints := []any(nil)
 		if includePending {
-			hints, err := h.q.ListPendingHintsByIHKID(r.Context(), sqlc.ListPendingHintsByIHKIDParams{
-				IhkID: row.ID,
-				Limit: 5,
-			})
-			if err != nil {
-				httpx.JSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "message": "Server error"})
-				return
-			}
-			pendingHints = make([]any, 0, len(hints))
-			for _, hint := range hints {
-				pendingHints = append(pendingHints, map[string]any{
-					"id":                uuidString(hint.ID),
-					"publicPendingText": hint.PublicPendingText,
-					"sourceUrl":         hint.SourceUrl,
-					"sourceNote":        hint.SourceNote,
-					"createdAt":         hint.CreatedAt.Time.UTC().Format(time.RFC3339),
-				})
+			pendingHints = pendingByIHK[row.ID]
+			if pendingHints == nil {
+				pendingHints = []any{}
 			}
 		}
 
@@ -355,7 +379,7 @@ func (h *Handler) SubmitInfoSuggestion(w http.ResponseWriter, r *http.Request) {
 
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
-		"message": "Dein Hinweis wurde eingereicht und erscheint bis zur Prüfung als ungeprüfter Community-Hinweis.",
+		"message": "Dein Hinweis wurde eingereicht",
 	})
 }
 

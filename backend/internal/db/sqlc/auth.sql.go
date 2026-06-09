@@ -139,3 +139,31 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 	}
 	return items, nil
 }
+
+const setUserActive = `-- name: SetUserActive :one
+UPDATE users
+SET is_active = $2
+WHERE id = $1
+RETURNING id, email, display_name, password_hash, is_verified, is_active, created_at, updated_at
+`
+
+type SetUserActiveParams struct {
+	ID       pgtype.UUID `json:"id"`
+	IsActive bool        `json:"is_active"`
+}
+
+func (q *Queries) SetUserActive(ctx context.Context, arg SetUserActiveParams) (User, error) {
+	row := q.db.QueryRow(ctx, setUserActive, arg.ID, arg.IsActive)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.IsVerified,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
