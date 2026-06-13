@@ -254,21 +254,39 @@ const listAdminInfoSuggestions = `-- name: ListAdminInfoSuggestions :many
 SELECT s.id, s.ihk_id, i.state AS ihk_state, s.public_pending_visible, s.status, s.created_at
 FROM info_suggestions s
 JOIN ihks i ON i.id = s.ihk_id
-WHERE ($1::text IS NULL OR status = $1)
-  AND ($2::uuid IS NULL OR ihk_id = $2::uuid)
-  AND ($3::bool IS NULL OR public_pending_visible = $3)
+JOIN (
+  SELECT
+    i2.id AS ihk_id,
+    COALESCE(bit_or(a.allow_mask), 0)::bigint AS allow_mask,
+    COALESCE(bit_or(a.deny_mask), 0)::bigint AS deny_mask
+  FROM ihks i2
+  JOIN user_role_assignments a ON a.user_id = $1::uuid
+    AND (a.expires_at IS NULL OR a.expires_at > now())
+    AND (
+      a.scope_type = 'global'
+      OR (a.scope_type = 'state' AND a.scope_id = i2.state)
+      OR (a.scope_type = 'ihk' AND a.scope_id = i2.id::text)
+    )
+  GROUP BY i2.id
+) scope_mask ON scope_mask.ihk_id = i.id
+WHERE ($2::text IS NULL OR status = $2)
+  AND ($3::uuid IS NULL OR ihk_id = $3::uuid)
+  AND ($4::bool IS NULL OR public_pending_visible = $4)
+  AND ((scope_mask.allow_mask & ~scope_mask.deny_mask) & $5::bigint) = $5::bigint
   AND (
-    $4::timestamptz IS NULL OR
-    (s.created_at < $4 OR (s.created_at = $4 AND s.id < $5::uuid))
+    $6::timestamptz IS NULL OR
+    (s.created_at < $6 OR (s.created_at = $6 AND s.id < $7::uuid))
   )
 ORDER BY s.created_at DESC, s.id DESC
-LIMIT $6
+LIMIT $8
 `
 
 type ListAdminInfoSuggestionsParams struct {
+	ActorUserID          pgtype.UUID        `json:"actor_user_id"`
 	Status               *string            `json:"status"`
 	IhkID                pgtype.UUID        `json:"ihk_id"`
 	PublicPendingVisible *bool              `json:"public_pending_visible"`
+	RequiredMask         int64              `json:"required_mask"`
 	CursorCreatedAt      pgtype.Timestamptz `json:"cursor_created_at"`
 	CursorID             pgtype.UUID        `json:"cursor_id"`
 	Limit                int32              `json:"limit"`
@@ -285,9 +303,11 @@ type ListAdminInfoSuggestionsRow struct {
 
 func (q *Queries) ListAdminInfoSuggestions(ctx context.Context, arg ListAdminInfoSuggestionsParams) ([]ListAdminInfoSuggestionsRow, error) {
 	rows, err := q.db.Query(ctx, listAdminInfoSuggestions,
+		arg.ActorUserID,
 		arg.Status,
 		arg.IhkID,
 		arg.PublicPendingVisible,
+		arg.RequiredMask,
 		arg.CursorCreatedAt,
 		arg.CursorID,
 		arg.Limit,
@@ -350,6 +370,62 @@ func (q *Queries) ListPendingHintsByIHKID(ctx context.Context, arg ListPendingHi
 	var items []ListPendingHintsByIHKIDRow
 	for rows.Next() {
 		var i ListPendingHintsByIHKIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.IhkID,
+			&i.PublicPendingText,
+			&i.SourceUrl,
+			&i.SourceNote,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingHintsByIHKIDs = `-- name: ListPendingHintsByIHKIDs :many
+SELECT h.id, h.ihk_id, h.public_pending_text, h.source_url, h.source_note, h.created_at
+FROM unnest($1::uuid[]) AS requested(ihk_id)
+JOIN LATERAL (
+  SELECT id, ihk_id, public_pending_text, source_url, source_note, created_at
+  FROM info_suggestions
+  WHERE ihk_id = requested.ihk_id
+    AND public_pending_visible = true
+    AND status IN ('submitted', 'under_review')
+  ORDER BY created_at DESC
+  LIMIT $2
+) h ON true
+ORDER BY h.ihk_id, h.created_at DESC
+`
+
+type ListPendingHintsByIHKIDsParams struct {
+	IhkIds      []pgtype.UUID `json:"ihk_ids"`
+	PerIhkLimit int32         `json:"per_ihk_limit"`
+}
+
+type ListPendingHintsByIHKIDsRow struct {
+	ID                pgtype.UUID        `json:"id"`
+	IhkID             pgtype.UUID        `json:"ihk_id"`
+	PublicPendingText string             `json:"public_pending_text"`
+	SourceUrl         *string            `json:"source_url"`
+	SourceNote        *string            `json:"source_note"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListPendingHintsByIHKIDs(ctx context.Context, arg ListPendingHintsByIHKIDsParams) ([]ListPendingHintsByIHKIDsRow, error) {
+	rows, err := q.db.Query(ctx, listPendingHintsByIHKIDs, arg.IhkIds, arg.PerIhkLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingHintsByIHKIDsRow
+	for rows.Next() {
+		var i ListPendingHintsByIHKIDsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.IhkID,

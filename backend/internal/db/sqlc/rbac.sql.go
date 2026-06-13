@@ -127,11 +127,13 @@ func (q *Queries) GetRoleTemplateByName(ctx context.Context, name string) (RoleT
 }
 
 const listRoleAssignmentsByUser = `-- name: ListRoleAssignmentsByUser :many
-SELECT scope_type, COALESCE(scope_id, '') AS scope_id, allow_mask, deny_mask
-FROM user_role_assignments
-WHERE user_id = $1
-  AND (expires_at IS NULL OR expires_at > now())
-ORDER BY created_at ASC
+SELECT a.scope_type, COALESCE(a.scope_id, '') AS scope_id, a.allow_mask, a.deny_mask
+FROM user_role_assignments a
+JOIN users u ON u.id = a.user_id
+WHERE a.user_id = $1
+  AND u.is_active = true
+  AND (a.expires_at IS NULL OR a.expires_at > now())
+ORDER BY a.created_at ASC
 `
 
 type ListRoleAssignmentsByUserRow struct {

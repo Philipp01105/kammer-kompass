@@ -19,21 +19,6 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/OK" }
         "401": { description: Ungueltige Zugangsdaten }
-  /register:
-    post:
-      tags: [Auth]
-      summary: Nutzerkonto registrieren oder Registrierung mit Rechteanfrage einreichen
-      description: Ohne requestedRoleTemplateId wird ein normales Konto direkt aktiviert. Mit requestedRoleTemplateId wird der Nutzer inaktiv angelegt und muss von einem Admin geprüft werden.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RegisterRequest"
-      responses:
-        "201": { $ref: "#/components/responses/OK" }
-        "202": { $ref: "#/components/responses/OK" }
-        "409": { description: E-Mail existiert bereits }
   /me:
     get:
       tags: [Auth]
@@ -41,26 +26,6 @@ paths:
       responses:
         "200": { description: Session-Nutzer }
         "401": { description: Nicht angemeldet }
-  /role-templates:
-    get:
-      tags: [Auth, RBAC]
-      summary: Rollen laden, die Nutzer beantragen können
-      responses:
-        "200": { description: Rollenliste }
-  /permission-requests:
-    post:
-      tags: [Auth, RBAC]
-      summary: Eingeloggter Nutzer beantragt zusätzliche Rechte
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PermissionRequestSubmitRequest"
-      responses:
-        "202": { $ref: "#/components/responses/OK" }
-        "409":
-          description: Rechte sind bereits vorhanden oder eine passende Anfrage ist noch offen
   /public/ihks:
     get:
       tags: [Public]
@@ -104,7 +69,7 @@ paths:
               $ref: "#/components/schemas/SubmitInfoSuggestionRequest"
       responses:
         "200":
-          description: Eingereicht und als ungeprüfter Community-Hinweis sichtbar
+          description: Eingereicht
           content:
             application/json:
               schema:
@@ -125,7 +90,7 @@ paths:
                 url:
                   value: { ok: false, code: URL_BLOCKED, message: "Bitte entferne unsichere Links." }
         "429": { $ref: "#/components/responses/RateLimited" }
-    /admin/me:
+  /admin/me:
     get:
       tags: [Admin]
       summary: Aktuellen Admin-Nutzer und effektive Abilities laden
@@ -147,7 +112,6 @@ paths:
                     properties:
                       canHidePendingHints: { type: boolean }
                       canManageModerationTerms: { type: boolean }
-                      canManagePermissionRequests: { type: boolean }
   /admin/info-suggestions:
     get:
       tags: [Admin, InfoSuggestions]
@@ -280,6 +244,29 @@ paths:
               $ref: "#/components/schemas/CreateAdminUserRequest"
       responses:
         "201": { $ref: "#/components/responses/OK" }
+  /admin/users/{id}/status:
+    patch:
+      tags: [Admin, Users]
+      summary: Nutzerstatus ändern
+      description: Erfordert Admin-Rechte. Statusänderungen an Super-Admin-Konten erfordern zusätzlich PermSystemAdmin und eine aktive globale super_admin-Rolle; Selbst-Deaktivierung ist verboten.
+      parameters: [ { $ref: "#/components/parameters/ID" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserStatusRequest"
+      responses:
+        "200":
+          description: Nutzerstatus aktualisiert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserStatusUpdateResponse"
+        "400": { description: Ungueltige Anfrage }
+        "401": { description: Nicht angemeldet }
+        "403": { description: Verboten; insbesondere bei geschuetzten Super-Admin-Konten oder Selbst-Deaktivierung }
+        "404": { description: Nutzer nicht gefunden }
   /admin/role-templates:
     get:
       tags: [Admin, Users]
@@ -313,44 +300,6 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses: { "200": { $ref: "#/components/responses/OK" } }
-  /admin/permission-requests:
-    get:
-      tags: [Admin, RBAC]
-      summary: Rechteanfragen und Registrierungen mit Rechtewunsch prüfen
-      parameters:
-        - { name: status, in: query, schema: { type: string, enum: [pending, approved, rejected] } }
-        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
-      responses: { "200": { description: Rechteanfragen-Liste } }
-  /admin/permission-requests/{id}:
-    get:
-      tags: [Admin, RBAC]
-      summary: Rechteanfrage mit Nutzeraktivität laden
-      parameters: [ { $ref: "#/components/parameters/ID" } ]
-      responses: { "200": { description: Rechteanfrage-Detail } }
-  /admin/permission-requests/{id}/approve:
-    post:
-      tags: [Admin, RBAC]
-      summary: Rechteanfrage akzeptieren, Rolle zuweisen und E-Mail senden
-      parameters: [ { $ref: "#/components/parameters/ID" } ]
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PermissionRequestDecisionRequest"
-      responses: { "200": { $ref: "#/components/responses/OK" } }
-  /admin/permission-requests/{id}/reject:
-    post:
-      tags: [Admin, RBAC]
-      summary: Rechteanfrage ablehnen und bei Registrierungsanfragen den Nutzer löschen
-      parameters: [ { $ref: "#/components/parameters/ID" } ]
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PermissionRequestDecisionRequest"
-      responses: { "200": { $ref: "#/components/responses/OK" } }
   /admin/ihks:
     get:
       tags: [Admin, IHKs]
@@ -364,7 +313,7 @@ paths:
   /admin/ihks/{id}:
     patch:
       tags: [Admin, IHKs]
-      summary: IHK-Stammdaten bearbeiten; nur globale super_admin Rolle
+      summary: IHK-Stammdaten bearbeiten; nur globale Super-Admin-Rolle
       parameters: [ { $ref: "#/components/parameters/ID" } ]
       requestBody:
         required: true
@@ -440,39 +389,9 @@ components:
       properties:
         email:
           type: string
-          description: E-Mail-Adresse oder super_admin beim initialen technischen Zugang.
+          description: E-Mail-Adresse des technischen Zugangs.
           maxLength: 320
         password: { type: string, minLength: 1, maxLength: 256 }
-    RegisterRequest:
-      type: object
-      required: [email, displayName, password]
-      properties:
-        email: { type: string, format: email, maxLength: 320 }
-        displayName: { type: string, minLength: 2, maxLength: 100 }
-        password: { type: string, minLength: 10, maxLength: 256 }
-        requestedRoleTemplateId:
-          type: string
-          format: uuid
-          description: Wenn gesetzt, wird eine Admin-Prüfung statt direkter Aktivierung gestartet.
-        requestedScopeType: { type: string, enum: [global, state, ihk] }
-        requestedScopeId:
-          type: string
-          description: Required for state and ihk scopes.
-        proofNote: { type: string, maxLength: 2000 }
-    PermissionRequestSubmitRequest:
-      type: object
-      required: [requestedRoleTemplateId, requestedScopeType]
-      properties:
-        requestedRoleTemplateId: { type: string, format: uuid }
-        requestedScopeType: { type: string, enum: [global, state, ihk] }
-        requestedScopeId:
-          type: string
-          description: Required for state and ihk scopes.
-        proofNote: { type: string, maxLength: 2000 }
-    PermissionRequestDecisionRequest:
-      type: object
-      properties:
-        note: { type: string, maxLength: 2000 }
     SubmitError:
       type: object
       required: [ok, message]
@@ -585,6 +504,22 @@ components:
         scopeId:
           type: string
           description: Required for state and ihk scopes when roleTemplateId is provided.
+    UpdateUserStatusRequest:
+      type: object
+      required: [isActive]
+      properties:
+        isActive: { type: boolean }
+    UserStatusUpdateResponse:
+      type: object
+      required: [ok, user]
+      properties:
+        ok: { type: boolean }
+        user:
+          type: object
+          required: [id, isActive]
+          properties:
+            id: { type: string, format: uuid }
+            isActive: { type: boolean }
     SuggestionStatus:
       type: string
       enum: [submitted, under_review, needs_more_info, accepted, rejected, applied, archived, spam]

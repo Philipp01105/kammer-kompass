@@ -302,35 +302,62 @@ func (q *Queries) GetPublicIHKBySlug(ctx context.Context, slug string) (GetPubli
 
 const listAdminIHKs = `-- name: ListAdminIHKs :many
 SELECT id, name, slug, city, state, official_url, is_active, created_at, updated_at
-FROM ihks
-WHERE ($1::text IS NULL OR state = $1)
+FROM (
+  SELECT
+    i.id,
+    i.name,
+    i.slug,
+    i.city,
+    i.state,
+    i.official_url,
+    i.is_active,
+    i.created_at,
+    i.updated_at,
+    COALESCE(bit_or(a.allow_mask), 0)::bigint AS allow_mask,
+    COALESCE(bit_or(a.deny_mask), 0)::bigint AS deny_mask
+  FROM ihks i
+  JOIN user_role_assignments a ON a.user_id = $1::uuid
+    AND (a.expires_at IS NULL OR a.expires_at > now())
+    AND (
+      a.scope_type = 'global'
+      OR (a.scope_type = 'state' AND a.scope_id = i.state)
+      OR (a.scope_type = 'ihk' AND a.scope_id = i.id::text)
+    )
+  WHERE ($2::text IS NULL OR i.state = $2)
+    AND (
+      $3::text IS NULL
+      OR i.name ILIKE ('%' || $3 || '%')
+      OR i.slug ILIKE ('%' || $3 || '%')
+      OR i.city ILIKE ('%' || $3 || '%')
+      OR i.state ILIKE ('%' || $3 || '%')
+    )
+  GROUP BY i.id, i.name, i.slug, i.city, i.state, i.official_url, i.is_active, i.created_at, i.updated_at
+) scoped
+WHERE ((allow_mask & ~deny_mask) & $4::bigint) = $4::bigint
   AND (
-    $2::text IS NULL
-    OR name ILIKE ('%' || $2 || '%')
-    OR slug ILIKE ('%' || $2 || '%')
-    OR city ILIKE ('%' || $2 || '%')
-    OR state ILIKE ('%' || $2 || '%')
-  )
-  AND (
-    $3::text IS NULL
-    OR (name > $3 OR (name = $3 AND id > $4::uuid))
+    $5::text IS NULL
+    OR (name > $5 OR (name = $5 AND id > $6::uuid))
   )
 ORDER BY name ASC, id ASC
-LIMIT $5
+LIMIT $7
 `
 
 type ListAdminIHKsParams struct {
-	State      *string     `json:"state"`
-	Query      *string     `json:"query"`
-	CursorName *string     `json:"cursor_name"`
-	CursorID   pgtype.UUID `json:"cursor_id"`
-	Limit      int32       `json:"limit"`
+	ActorUserID  pgtype.UUID `json:"actor_user_id"`
+	State        *string     `json:"state"`
+	Query        *string     `json:"query"`
+	RequiredMask int64       `json:"required_mask"`
+	CursorName   *string     `json:"cursor_name"`
+	CursorID     pgtype.UUID `json:"cursor_id"`
+	Limit        int32       `json:"limit"`
 }
 
 func (q *Queries) ListAdminIHKs(ctx context.Context, arg ListAdminIHKsParams) ([]Ihk, error) {
 	rows, err := q.db.Query(ctx, listAdminIHKs,
+		arg.ActorUserID,
 		arg.State,
 		arg.Query,
+		arg.RequiredMask,
 		arg.CursorName,
 		arg.CursorID,
 		arg.Limit,

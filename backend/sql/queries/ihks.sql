@@ -68,15 +68,38 @@ WHERE id = $1;
 
 -- name: ListAdminIHKs :many
 SELECT id, name, slug, city, state, official_url, is_active, created_at, updated_at
-FROM ihks
-WHERE (sqlc.narg('state')::text IS NULL OR state = sqlc.narg('state'))
-  AND (
-    sqlc.narg('query')::text IS NULL
-    OR name ILIKE ('%' || sqlc.narg('query') || '%')
-    OR slug ILIKE ('%' || sqlc.narg('query') || '%')
-    OR city ILIKE ('%' || sqlc.narg('query') || '%')
-    OR state ILIKE ('%' || sqlc.narg('query') || '%')
-  )
+FROM (
+  SELECT
+    i.id,
+    i.name,
+    i.slug,
+    i.city,
+    i.state,
+    i.official_url,
+    i.is_active,
+    i.created_at,
+    i.updated_at,
+    COALESCE(bit_or(a.allow_mask), 0)::bigint AS allow_mask,
+    COALESCE(bit_or(a.deny_mask), 0)::bigint AS deny_mask
+  FROM ihks i
+  JOIN user_role_assignments a ON a.user_id = sqlc.arg('actor_user_id')::uuid
+    AND (a.expires_at IS NULL OR a.expires_at > now())
+    AND (
+      a.scope_type = 'global'
+      OR (a.scope_type = 'state' AND a.scope_id = i.state)
+      OR (a.scope_type = 'ihk' AND a.scope_id = i.id::text)
+    )
+  WHERE (sqlc.narg('state')::text IS NULL OR i.state = sqlc.narg('state'))
+    AND (
+      sqlc.narg('query')::text IS NULL
+      OR i.name ILIKE ('%' || sqlc.narg('query') || '%')
+      OR i.slug ILIKE ('%' || sqlc.narg('query') || '%')
+      OR i.city ILIKE ('%' || sqlc.narg('query') || '%')
+      OR i.state ILIKE ('%' || sqlc.narg('query') || '%')
+    )
+  GROUP BY i.id, i.name, i.slug, i.city, i.state, i.official_url, i.is_active, i.created_at, i.updated_at
+) scoped
+WHERE ((allow_mask & ~deny_mask) & sqlc.arg('required_mask')::bigint) = sqlc.arg('required_mask')::bigint
   AND (
     sqlc.narg('cursor_name')::text IS NULL
     OR (name > sqlc.narg('cursor_name') OR (name = sqlc.narg('cursor_name') AND id > sqlc.narg('cursor_id')::uuid))
