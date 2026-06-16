@@ -74,7 +74,6 @@ export type AdminMeResponse = {
   abilities: {
     canHidePendingHints: boolean;
     canManageModerationTerms: boolean;
-    canManagePermissionRequests?: boolean;
   };
 };
 
@@ -85,7 +84,6 @@ export type AdminAbility =
   | "canManageModerationTerms"
   | "canManageUsers"
   | "canReadAuditLogs"
-  | "canManagePermissionRequests"
   | "canPublishIHKInfo"
   | "canRollbackIHKInfo"
   | "canUpdateIHK";
@@ -205,36 +203,4 @@ export type AuditLog = {
   ipHash?: string | null;
   userAgentHash?: string | null;
   createdAt: string;
-};
-
-export type PermissionRequestListItem = {
-  id: string;
-  userId: string;
-  email: string;
-  displayName: string;
-  requestType: "registration" | "role_request";
-  requestedRoleTemplateId: string;
-  requestedRoleName: string;
-  requestedScopeType: "global" | "state" | "ihk";
-  requestedScopeId?: string | null;
-  proofNote?: string | null;
-  status: "pending" | "approved" | "rejected";
-  createdAt: string;
-};
-
-export type PermissionRequestActivity = {
-  type: "info_suggestion";
-  id: string;
-  status: string;
-  href: string;
-  createdAt: string;
-};
-
-export type PermissionRequestDetail = PermissionRequestListItem & {
-  requestedAllowMask: number;
-  reviewedBy?: string | null;
-  reviewedAt?: string | null;
-  decisionNote?: string | null;
-  updatedAt: string;
-  activities: PermissionRequestActivity[];
 };

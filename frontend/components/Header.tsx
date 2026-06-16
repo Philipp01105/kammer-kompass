@@ -2,14 +2,10 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, LogIn, ShieldCheck } from "lucide-react";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Building2, LogIn } from "lucide-react";
 import { adminApi } from "@/lib/api";
-import { PermissionRequestModal } from "@/components/PermissionRequestModal";
 
 export function Header() {
-  const [permissionOpen, setPermissionOpen] = useState(false);
   const me = useQuery({
     queryKey: ["auth-me"],
     queryFn: adminApi.authMe,
@@ -33,10 +29,9 @@ export function Header() {
         </div>
         <div className="flex flex-wrap gap-2">
           {isLoggedIn ? (
-            <Button variant="secondary" onClick={() => setPermissionOpen(true)}>
-              <ShieldCheck className="h-4 w-4" />
-              Rechte anfragen
-            </Button>
+            <Link href="/admin/dashboard" className="inline-flex min-h-11 items-center justify-center rounded-md bg-secondary px-5 py-2.5 text-base font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 focus:outline-none focus:ring-2 focus:ring-ring">
+              Admin
+            </Link>
           ) : (
             <Link
               href="/login"
@@ -48,7 +43,6 @@ export function Header() {
           )}
         </div>
       </div>
-      <PermissionRequestModal open={permissionOpen} onOpenChange={setPermissionOpen} />
     </header>
   );
 }

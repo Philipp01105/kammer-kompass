@@ -12,8 +12,6 @@ import type {
   ModerationStatus,
   ModerationTerm,
   OKResponse,
-  PermissionRequestDetail,
-  PermissionRequestListItem,
   PublicIHKItem,
   RoleTemplate,
   UserRoleAssignment,
@@ -92,19 +90,7 @@ export const adminApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  register: (body: unknown) =>
-    apiFetch<OKResponse>(`${API_PREFIX}/register`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
   authMe: () => apiFetch<AuthMeResponse>(`${API_PREFIX}/me`),
-  listRequestableRoleTemplates: () =>
-    apiFetch<{ items: RoleTemplate[] }>(`${API_PREFIX}/role-templates`),
-  requestPermissions: (body: unknown) =>
-    apiFetch<OKResponse>(`${API_PREFIX}/permission-requests`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
   me: () => apiFetch<AdminMeResponse>(`${API_PREFIX}/admin/me`),
   listInfoSuggestions: (status?: ModerationStatus, publicPendingVisible?: boolean) =>
     apiFetch<ListResponse<AdminInfoSuggestionListItem>>(
@@ -170,6 +156,14 @@ export const adminApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  updateUserStatus: (id: string, body: { isActive: boolean }) =>
+    apiFetch<OKResponse & { user: { id: string; isActive: boolean } }>(
+      `${API_PREFIX}/admin/users/${id}/status`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }
+    ),
   listRoleTemplates: () =>
     apiFetch<{ items: RoleTemplate[] }>(`${API_PREFIX}/admin/role-templates`),
   listUserRoles: (id: string) =>
@@ -186,15 +180,4 @@ export const adminApi = {
     ),
   listAuditLogs: () =>
     apiFetch<ListResponse<AuditLog>>(`${API_PREFIX}/admin/audit-logs`),
-  listPermissionRequests: (status?: string) =>
-    apiFetch<ListResponse<PermissionRequestListItem>>(
-      `${API_PREFIX}/admin/permission-requests${buildQuery({ status })}`
-    ),
-  getPermissionRequest: (id: string) =>
-    apiFetch<PermissionRequestDetail>(`${API_PREFIX}/admin/permission-requests/${id}`),
-  decidePermissionRequest: (id: string, action: "approve" | "reject", body?: unknown) =>
-    apiFetch<OKResponse>(`${API_PREFIX}/admin/permission-requests/${id}/${action}`, {
-      method: "POST",
-      body: JSON.stringify(body ?? {}),
-    }),
 };

@@ -19,20 +19,30 @@ export function InfoSuggestionDetail({ detail }: { detail: Detail }) {
   const queryClient = useQueryClient();
   const { abilities } = useAbilities();
   const [hideReason, setHideReason] = useState("");
+  const [hiddenPendingSuggestionIds, setHiddenPendingSuggestionIds] = useState<Set<string>>(() => new Set());
   const [newText, setNewText] = useState(detail.liveCurrentText || detail.currentTextSnapshot);
   const [confidenceLevel, setConfidenceLevel] = useState("medium");
   const [sourceSummary, setSourceSummary] = useState("");
   const [changeSummary, setChangeSummary] = useState("");
+
+  const pendingVisible = detail.publicPendingVisible && !hiddenPendingSuggestionIds.has(detail.id);
   const canStartReview = detail.status === "submitted" && abilities.canReviewInfoSuggestions;
   const canReview = detail.status === "under_review" && abilities.canReviewInfoSuggestions;
   const canReopen = (detail.status === "needs_more_info" || detail.status === "rejected") && abilities.canReviewInfoSuggestions;
-  const canHidePending = abilities.canHidePendingHints && detail.publicPendingVisible;
+  const canHidePending = abilities.canHidePendingHints && pendingVisible;
   const showWorkflow = canStartReview || canReview || canReopen || canHidePending;
 
   const action = useMutation({
     mutationFn: ({ endpoint, body }: { endpoint: string; body?: unknown }) =>
       adminApi.postInfoSuggestionAction(detail.id, endpoint, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin-info-suggestion", detail.id] }),
+    onSuccess: async (_data, variables) => {
+      if (variables.endpoint === "hide-pending") {
+        setHiddenPendingSuggestionIds((ids) => new Set(ids).add(detail.id));
+        setHideReason("");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["admin-info-suggestion", detail.id] });
+      await queryClient.invalidateQueries({ queryKey: ["admin-info-suggestions"] });
+    },
   });
   const apply = useMutation({
     mutationFn: () =>
@@ -58,7 +68,7 @@ export function InfoSuggestionDetail({ detail }: { detail: Detail }) {
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
           Sprache: de · Confidence: {String(detail.languageConfidence)} · Pending sichtbar:{" "}
-          {detail.publicPendingVisible ? "ja" : "nein"}
+          {pendingVisible ? "ja" : "nein"}
         </p>
       </section>
 
@@ -117,7 +127,7 @@ export function InfoSuggestionDetail({ detail }: { detail: Detail }) {
               </Field>
               <Button type="submit" variant="secondary" disabled={!hideReason.trim() || action.isPending}>
                 <EyeOff className="h-4 w-4" />
-                Pending-Hinweis ausblenden
+                {action.isPending ? "Wird ausgeblendet..." : "Pending-Hinweis ausblenden"}
               </Button>
             </form>
           ) : null}

@@ -9,7 +9,6 @@ import {
   Landmark,
   ScrollText,
   Shield,
-  ShieldCheck,
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,12 +30,6 @@ const links: Array<{
   },
   { href: "/admin/ihks", label: "IHKs", icon: Landmark, ability: "canPublishIHKInfo" },
   { href: "/admin/moderation", label: "Moderation", icon: Shield, ability: "canManageModerationTerms" },
-  {
-    href: "/admin/permission-requests",
-    label: "Rechteanfragen",
-    icon: ShieldCheck,
-    ability: "canManagePermissionRequests",
-  },
   { href: "/admin/users", label: "Users", icon: Users, ability: "canManageUsers" },
   { href: "/admin/audit", label: "Audit Logs", icon: ScrollText, ability: "canReadAuditLogs" },
   { href: "/admin/ihks", label: "Versionen", icon: History, ability: "canPublishIHKInfo" },
