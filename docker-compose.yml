@@ -37,9 +37,13 @@ services:
       REDIS_ADDR: "redis:6379"
       SERVER_SECRET_SALT: "${SERVER_SECRET_SALT}"
       # base64 32 byte keys
-      SESSION_AUTH_KEY: "${SESSION_AUTH_KEY:-MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=}"
-      SESSION_ENC_KEY: "${SESSION_ENC_KEY:-MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=}"
-      SESSION_SECURE: "false"
+      SESSION_AUTH_KEY: "${SESSION_AUTH_KEY}"
+      SESSION_ENC_KEY: "${SESSION_ENC_KEY}"
+      SESSION_SECURE: "${SESSION_SECURE:-false}"
+      BOOTSTRAP_SUPER_ADMIN: "${BOOTSTRAP_SUPER_ADMIN:-true}"
+      BOOTSTRAP_SUPER_ADMIN_PASSWORD: "${BOOTSTRAP_SUPER_ADMIN_PASSWORD:-testtesttesttest}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
+      TRUSTED_PROXIES: "${TRUSTED_PROXIES:-}"
     depends_on:
       postgres:
         condition: service_healthy
