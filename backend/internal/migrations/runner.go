@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// embeds the migration files in the executablwe
+// embeds the migration files in the executable
 //
 //go:embed sql/*.sql
 var files embed.FS

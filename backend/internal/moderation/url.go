@@ -11,17 +11,35 @@ var (
 	ErrTooManyLinks     = errors.New("too many links")
 )
 
-var httpLinkRegex = regexp.MustCompile(`https?://[^\s]+`)
+var (
+	httpLinkRegex = regexp.MustCompile(`https?://[^\s]+`)
+	schemeRegex   = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]{1,31})\s*:`)
+)
 
-// CheckURLSafety checks if the text contains blocked URL schemes or too many links
-// TODO: extend list of blocked schemes
+var blockedSchemes = map[string]struct{}{
+	"about":      {},
+	"blob":       {},
+	"chrome":     {},
+	"content":    {},
+	"data":       {},
+	"file":       {},
+	"filesystem": {},
+	"ftp":        {},
+	"gopher":     {},
+	"javascript": {},
+	"vbscript":   {},
+}
+
+// CheckURLSafety blocks executable/local URL schemes and limits the number of
+// public HTTP(S) links allowed in user-submitted text.
 func CheckURLSafety(text string, maxLinks int) error {
-	t := strings.ToLower(text)
-	if strings.Contains(t, "javascript:") ||
-		strings.Contains(t, "data:") ||
-		strings.Contains(t, "file:") ||
-		strings.Contains(t, "vbscript:") {
-		return ErrBlockedURLScheme
+	for _, match := range schemeRegex.FindAllStringSubmatch(strings.ToLower(text), -1) {
+		if len(match) < 2 {
+			continue
+		}
+		if _, blocked := blockedSchemes[strings.TrimSpace(match[1])]; blocked {
+			return ErrBlockedURLScheme
+		}
 	}
 
 	if maxLinks > 0 && len(httpLinkRegex.FindAllString(text, -1)) > maxLinks {
